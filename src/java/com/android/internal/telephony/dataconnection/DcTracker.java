@@ -41,6 +41,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.os.PersistableBundle;
 import android.os.RegistrantList;
 import android.os.ServiceManager;
 import android.os.SystemClock;
@@ -48,6 +49,7 @@ import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.provider.Settings;
 import android.provider.Telephony;
+import android.telephony.CarrierConfigManager;
 import android.telephony.CellLocation;
 import android.telephony.ServiceState;
 import android.telephony.TelephonyManager;
@@ -703,6 +705,7 @@ public class DcTracker extends DcTrackerBase {
         }
     }
 
+
     private boolean isDataRoamingAllowed(ApnContext apnContext) {
         boolean allowDataRoaming = (!mPhone.getServiceState().getDataRoaming()
                 || apnContext.getApnType().equals(PhoneConstants.APN_TYPE_IMS)
@@ -713,6 +716,19 @@ public class DcTracker extends DcTrackerBase {
                 log("isDataAllowed: not allowed due to" + reason);
         }
         return allowDataRoaming;
+    }
+    private boolean allowMmsWhenMobileDataOff() {
+        boolean allowed = false;
+
+        CarrierConfigManager configManager = (CarrierConfigManager) mPhone.getContext()
+                .getSystemService(Context.CARRIER_CONFIG_SERVICE);
+        PersistableBundle bundle = configManager.getConfigForSubId(mPhone.getSubId());
+        if (bundle != null) {
+            allowed = bundle.getBoolean(
+                    CarrierConfigManager.KEY_ALLOW_MMS_WHEN_MOBILE_DATA_OFF_BOOL);
+        }
+
+        return allowed;
     }
 
     //****** Called from ServiceStateTracker
@@ -900,8 +916,17 @@ public class DcTracker extends DcTrackerBase {
         boolean isEmergencyApn = apnContext.getApnType().equals(PhoneConstants.APN_TYPE_EMERGENCY);
         final ServiceStateTracker sst = mPhone.getServiceStateTracker();
         boolean desiredPowerState = sst.getDesiredPowerState();
-        boolean checkUserDataEnabled =
-                    !(apnContext.getApnType().equals(PhoneConstants.APN_TYPE_IMS));
+        boolean checkUserDataEnabled = true;
+
+        if (apnContext.getApnType().equals(PhoneConstants.APN_TYPE_IMS)) {
+            checkUserDataEnabled = false;
+        } else if (apnContext.getApnType().equals(PhoneConstants.APN_TYPE_MMS) &&
+                       allowMmsWhenMobileDataOff()) {
+            // If allowMmsWhenMobileDataOff is set to true, it is not
+            // necessary to check data enable.
+            // MMS will be available no matter data is enable or not.
+            checkUserDataEnabled = false;
+        }
 
         // MMS: If property is set, enable mms data even if mobile data is turned off.
         if (apnContext.getApnType().equals(PhoneConstants.APN_TYPE_MMS)) {
