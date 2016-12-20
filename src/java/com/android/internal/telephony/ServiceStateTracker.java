@@ -945,11 +945,7 @@ public class ServiceStateTracker extends Handler {
                 }
                 // This will do nothing in the 'radio not available' case
                 setPowerStateToDesired();
-                if (mCi.getRilVersion() >= 10) {
-                    modemTriggeredPollState();
-                } else {
-                    pollState();
-                }
+                modemTriggeredPollState();
                 break;
 
             case EVENT_NETWORK_STATE_CHANGED:
