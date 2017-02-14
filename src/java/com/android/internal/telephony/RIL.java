@@ -766,7 +766,6 @@ public class RIL extends BaseCommands implements CommandsInterface {
         final String oldRilFeatures = SystemProperties.get("ro.telephony.ril.config", "");
         mOldRilFeatures = Arrays.asList(oldRilFeatures.split(","));
 
-        mEventLog = new TelephonyEventLog(mInstanceId);
         PowerManager pm = (PowerManager)context.getSystemService(Context.POWER_SERVICE);
         mWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, RILJ_LOG_TAG);
         mWakeLock.setReferenceCounted(false);
