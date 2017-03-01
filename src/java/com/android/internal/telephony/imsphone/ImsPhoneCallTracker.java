@@ -362,7 +362,7 @@ public class ImsPhoneCallTracker extends CallTracker implements ImsPullCall {
         mImsManager = ImsManager.getInstance(mPhone.getContext(), mPhone.getPhoneId());
             mServiceId = mImsManager.open(ImsServiceClass.MMTEL,
                     createIncomingCallPendingIntent(),
-                    mImsConnectionStateListener, mPhone.getPhoneId());
+                    mImsConnectionStateListener);
 
         mImsManager.setImsConfigListener(mImsConfigListener);
 

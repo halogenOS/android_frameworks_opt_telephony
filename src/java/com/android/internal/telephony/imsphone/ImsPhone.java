@@ -798,8 +798,9 @@ public class ImsPhone extends ImsPhoneBase {
 
             try {
                 ImsUtInterface ut = mCT.getUtInterface();
-                ut.queryCallForward(getConditionFromCFReason(commandInterfaceCFReason), null,
-                        commandInterfaceServiceClass, resp);
+                ut.queryCallForward(
+                    getConditionFromCFReason(commandInterfaceCFReason),
+                    null, resp);
             } catch (ImsException e) {
                 sendErrorResponse(onComplete, e);
             }
