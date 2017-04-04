@@ -845,7 +845,7 @@ public class ImsPhone extends ImsPhoneBase {
                         dialingNumber,
                         serviceClass,
                         timerSeconds,
-                        onComplete);
+                        resp);
             } catch (ImsException e) {
                 sendErrorResponse(onComplete, e);
             }
