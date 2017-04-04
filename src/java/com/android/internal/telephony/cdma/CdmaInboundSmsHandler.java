@@ -174,7 +174,8 @@ public class CdmaInboundSmsHandler extends InboundSmsHandler {
 
         if (SmsEnvelope.TELESERVICE_WAP == teleService) {
             return processCdmaWapPdu(sms.getUserData(), sms.mMessageRef,
-                    sms.getOriginatingAddress(), sms.getTimestampMillis());
+                    sms.getOriginatingAddress(), sms.getDisplayOriginatingAddress(),
+                    sms.getTimestampMillis());
         } else if (SmsEnvelope.TELESERVICE_CT_WAP == teleService) {
             /* China Telecom WDP header contains Message identifier
                and User data subparametrs extract these fields */

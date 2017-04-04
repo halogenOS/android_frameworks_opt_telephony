@@ -1890,9 +1890,7 @@ public class DcTracker extends Handler {
         // carrier allows it, and config_tether_apndata resource.
         String apnData = Settings.Global.getString(mResolver, Settings.Global.TETHER_DUN_APN);
         List<ApnSetting> dunSettings = ApnSetting.arrayFromString(apnData);
-        IccRecords r = mIccRecords.get();
         for (ApnSetting dunSetting : dunSettings) {
-            String operator = mPhone.getOperatorNumeric();
             if (!ServiceState.bitmaskHasTech(dunSetting.bearerBitmask, bearer)) continue;
             if (dunSetting.numeric.equals(operator)) {
                 if (dunSetting.hasMvnoParams()) {

@@ -2297,9 +2297,7 @@ public class ImsPhoneCallTracker extends CallTracker implements ImsPullCall {
                             + ", isVideoCallEnabled=" + isVideoCallEnabled()
                             + ", isVowifiEnabled=" + isVowifiEnabled()
                             + ", isUtEnabled=" + isUtEnabled());
-                for (ImsPhoneConnection connection : mConnections) {
-                    connection.updateWifiState();
-                }
+
                 mPhone.getServiceState().setRilImsRadioTechnology(getRilImsRadioTechnology());
                 mPhone.onFeatureCapabilityChanged();
 

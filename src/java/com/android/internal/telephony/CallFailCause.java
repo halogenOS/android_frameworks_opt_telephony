@@ -62,7 +62,6 @@ public interface CallFailCause {
     // Supplementary
     int NO_ROUTE_TO_DESTINAON = 3;
     int CHANNEL_UNACCEPTABLE = 6;
-    int OPERATOR_DETERMINED_BARRING = 8;
     int CALL_FAIL_NO_USER_RESPONDING = 18;
     int CALL_FAIL_NO_ANSWER_FROM_USER = 19;
     int CALL_REJECTED = 21;

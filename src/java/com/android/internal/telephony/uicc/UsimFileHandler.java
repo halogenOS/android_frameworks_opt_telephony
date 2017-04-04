@@ -61,8 +61,6 @@ public final class UsimFileHandler extends IccFileHandler implements IccConstant
         case EF_GID1:
         case EF_GID2:
         case EF_LI:
-        case EF_PLMNWACT:
-        case EF_HPLMNWACT:
         case EF_PLMN_W_ACT:
         case EF_OPLMN_W_ACT:
         case EF_HPLMN_W_ACT:
