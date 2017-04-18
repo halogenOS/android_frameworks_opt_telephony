@@ -3413,7 +3413,7 @@ public class DcTracker extends Handler {
         notifyOffApnsOfAvailability(reason);
     }
 
-    private void setDataProfilesAsNeeded() {
+    public void setDataProfilesAsNeeded() {
         if (DBG) log("setDataProfilesAsNeeded mSetDataProfileStatus: " + mSetDataProfileStatus);
         if (mAllApnSettings != null && !mAllApnSettings.isEmpty()) {
             ArrayList<DataProfile> dps = new ArrayList<DataProfile>();
