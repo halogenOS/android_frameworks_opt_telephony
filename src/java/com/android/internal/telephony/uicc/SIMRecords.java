@@ -183,7 +183,6 @@ public class SIMRecords extends IccRecords {
     private static final int EVENT_SIM_REFRESH = 3 + SYSTEM_EVENT_BASE;
 
 
-
     // Lookup table for carriers known to produce SIMs which incorrectly indicate MNC length.
 
     private static final String[] MCCMNC_CODES_HAVING_3DIGITS_MNC = {
