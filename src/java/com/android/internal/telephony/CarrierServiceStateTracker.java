@@ -16,7 +16,6 @@
 
 package com.android.internal.telephony;
 
-import android.content.ComponentName;
 import android.app.PendingIntent;
 import android.app.Notification;
 import android.app.NotificationManager;
@@ -24,8 +23,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Handler;
 import android.os.Message;
 import android.os.PersistableBundle;
@@ -158,13 +155,6 @@ public class CarrierServiceStateTracker extends Handler {
 
 
         Intent notificationIntent = new Intent(Settings.ACTION_DATA_ROAMING_SETTINGS);
-        if (isNetworkSettingsApkAvailable(context)) {
-          notificationIntent.setComponent(new ComponentName("com.qualcomm.qti.networksetting",
-                "com.qualcomm.qti.networksetting.MobileNetworkSettings"));
-        } else {
-            notificationIntent.setComponent(new ComponentName("com.android.phone",
-                "com.android.phone.MobileNetworkSettings"));
-        }
         PendingIntent settingsIntent = PendingIntent.getActivity(context, 0, notificationIntent,
                 PendingIntent.FLAG_ONE_SHOT);
 
@@ -199,16 +189,4 @@ public class CarrierServiceStateTracker extends Handler {
                 context.getSystemService(Context.NOTIFICATION_SERVICE);
         notificationManager.cancel(NOTIFICATION_ID);
     }
-
-    private boolean isNetworkSettingsApkAvailable(Context context) {
-        // check whether the target handler exist in system
-        PackageManager pm = context.getPackageManager();
-        try {
-            pm.getPackageInfo("com.qualcomm.qti.networksetting", 0);
-            return true;
-        } catch (NameNotFoundException e) {
-            return false;
-        }
-    }
 }
-
