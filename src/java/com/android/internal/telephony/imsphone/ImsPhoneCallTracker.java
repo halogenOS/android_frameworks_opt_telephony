@@ -113,6 +113,10 @@ public class ImsPhoneCallTracker extends CallTracker implements ImsPullCall {
         void onPhoneStateChanged(PhoneConstants.State oldState, PhoneConstants.State newState);
     }
 
+    public interface SharedPreferenceProxy {
+        SharedPreferences getDefaultSharedPreferences(Context context);
+    }
+
     private static final boolean DBG = true;
 
     // When true, dumps the state of ImsPhoneCallTracker after changes to foreground and background
@@ -598,6 +602,13 @@ public class ImsPhoneCallTracker extends CallTracker implements ImsPullCall {
      */
     private boolean mShouldUpdateImsConfigOnDisconnect = false;
 
+    /**
+     * Default implementation for retrieving shared preferences; uses the actual PreferencesManager.
+     */
+    private SharedPreferenceProxy mSharedPreferenceProxy = (Context context) -> {
+        return PreferenceManager.getDefaultSharedPreferences(context);
+    };
+
     // Callback fires when ImsManager MMTel Feature changes state
     private ImsServiceProxy.INotifyStatusChanged mNotifyStatusChangedCallback = () -> {
         try {
@@ -678,11 +689,23 @@ public class ImsPhoneCallTracker extends CallTracker implements ImsPullCall {
         sendEmptyMessage(EVENT_GET_IMS_SERVICE);
     }
 
+    /**
+     * Test-only method used to mock out access to the shared preferences through the
+     * {@link PreferenceManager}.
+     * @param sharedPreferenceProxy
+     */
+    @VisibleForTesting
+    public void setSharedPreferenceProxy(SharedPreferenceProxy sharedPreferenceProxy) {
+        mSharedPreferenceProxy = sharedPreferenceProxy;
+    }
+
     private int getPackageUid(Context context, String pkg) {
         if (pkg == null) {
             return NetworkStats.UID_ALL;
         }
 
+        // Initialize to UID_ALL so at least it can be counted to overall data usage if
+        // the dialer's package uid is not available.
         int uid = NetworkStats.UID_ALL;
         try {
             uid = context.getPackageManager().getPackageUid(pkg, 0);
@@ -794,8 +817,16 @@ public class ImsPhoneCallTracker extends CallTracker implements ImsPullCall {
 
     public Connection dial(String dialString, int videoState, Bundle intentExtras) throws
             CallStateException {
-        SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(mPhone.getContext());
-        int oirMode = sp.getInt(Phone.CLIR_KEY, CommandsInterface.CLIR_DEFAULT);
+        int oirMode;
+        if (mSharedPreferenceProxy != null && mPhone.getDefaultPhone() != null) {
+            SharedPreferences sp = mSharedPreferenceProxy.getDefaultSharedPreferences(
+                    mPhone.getContext());
+            oirMode = sp.getInt(Phone.CLIR_KEY + mPhone.getDefaultPhone().getPhoneId(),
+                    CommandsInterface.CLIR_DEFAULT);
+        } else {
+            loge("dial; could not get default CLIR mode.");
+            oirMode = CommandsInterface.CLIR_DEFAULT;
+        }
         return dial(dialString, oirMode, videoState, intentExtras);
     }
 
@@ -2878,6 +2909,17 @@ public class ImsPhoneCallTracker extends CallTracker implements ImsPullCall {
         // a separate entry if uid is different from the previous snapshot.
         NetworkStats vtDataUsageUidSnapshot = new NetworkStats(currentTime, 1);
         vtDataUsageUidSnapshot.combineAllValues(mVtDataUsageUidSnapshot);
+
+        // The dialer uid might not be initialized correctly during boot up due to telecom service
+        // not ready or its default dialer cache not ready. So we double check again here to see if
+        // default dialer uid is really not available.
+        if (mDefaultDialerUid.get() == NetworkStats.UID_ALL) {
+            final TelecomManager telecomManager =
+                    (TelecomManager) mPhone.getContext().getSystemService(Context.TELECOM_SERVICE);
+            mDefaultDialerUid.set(
+                    getPackageUid(mPhone.getContext(), telecomManager.getDefaultDialerPackage()));
+        }
+
         // Since the modem only reports the total vt data usage rather than rx/tx separately,
         // the only thing we can do here is splitting the usage into half rx and half tx.
         vtDataUsageUidSnapshot.combineValues(new NetworkStats.Entry(
