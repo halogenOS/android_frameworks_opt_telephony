@@ -1258,11 +1258,11 @@ public class GsmCdmaPhone extends Phone {
                 "cannot dial voice call in airplane mode");
         }
         // Check for service before placing non emergency CS voice call.
-        // Allow dial only if either CS is camped on any RAT (or) PS is in LTE service.
+        // Allow dial only if either CS is camped on any RAT (or) PS is in LTE/NR service.
         if (mSST != null
                 && mSST.mSS.getState() == ServiceState.STATE_OUT_OF_SERVICE /* CS out of service */
                 && !(mSST.mSS.getDataRegState() == ServiceState.STATE_IN_SERVICE
-                    && ServiceState.isLte(mSST.mSS.getRilDataRadioTechnology())) /* PS not in LTE */
+                && ServiceState.isPsTech(mSST.mSS.getRilDataRadioTechnology())) /* PS not in LTE/NR */
                 && !VideoProfile.isVideo(dialArgs.videoState) /* voice call */
                 && !isEmergency /* non-emergency call */) {
             throw new CallStateException(
@@ -2449,7 +2449,7 @@ public class GsmCdmaPhone extends Phone {
 
             case EVENT_RUIM_RECORDS_LOADED:
                 logd("Event EVENT_RUIM_RECORDS_LOADED Received");
-                updateCurrentCarrierInProvider();
+                updateDataConnectionTracker();
                 break;
 
             case EVENT_RADIO_ON:
@@ -2881,6 +2881,7 @@ public class GsmCdmaPhone extends Phone {
                 final IccRecords iccRecords = newUiccApplication.getIccRecords();
                 mUiccApplication.set(newUiccApplication);
                 mIccRecords.set(iccRecords);
+                logd("mIccRecords = " + mIccRecords);
                 registerForIccRecordEvents();
                 mIccPhoneBookIntManager.updateIccRecords(iccRecords);
                 if (iccRecords != null) {
@@ -3487,11 +3488,11 @@ public class GsmCdmaPhone extends Phone {
                 cdmaApplication.getType() == AppType.APPTYPE_RUIM);
     }
 
-    private void phoneObjectUpdater(int newVoiceRadioTech) {
+    protected void phoneObjectUpdater(int newVoiceRadioTech) {
         logd("phoneObjectUpdater: newVoiceRadioTech=" + newVoiceRadioTech);
 
         // Check for a voice over lte replacement
-        if (ServiceState.isLte(newVoiceRadioTech)
+        if (ServiceState.isPsTech(newVoiceRadioTech)
                 || (newVoiceRadioTech == ServiceState.RIL_RADIO_TECHNOLOGY_UNKNOWN)) {
             CarrierConfigManager configMgr = (CarrierConfigManager)
                     getContext().getSystemService(Context.CARRIER_CONFIG_SERVICE);
@@ -3675,6 +3676,8 @@ public class GsmCdmaPhone extends Phone {
         pw.println("GsmCdmaPhone extends:");
         super.dump(fd, pw, args);
         pw.println(" mPrecisePhoneType=" + mPrecisePhoneType);
+        pw.println(" mSimRecords=" + mSimRecords);
+        pw.println(" mIsimUiccRecords=" + mIsimUiccRecords);
         pw.println(" mCT=" + mCT);
         pw.println(" mSST=" + mSST);
         pw.println(" mPendingMMIs=" + mPendingMMIs);
@@ -3725,7 +3728,8 @@ public class GsmCdmaPhone extends Phone {
     /**
      * @return operator numeric.
      */
-    private String getOperatorNumeric() {
+    @Override
+    public String getOperatorNumeric() {
         String operatorNumeric = null;
         if (isPhoneTypeGsm()) {
             IccRecords r = mIccRecords.get();
@@ -3790,7 +3794,8 @@ public class GsmCdmaPhone extends Phone {
     private static final int[] VOICE_PS_CALL_RADIO_TECHNOLOGY = {
             ServiceState.RIL_RADIO_TECHNOLOGY_LTE,
             ServiceState.RIL_RADIO_TECHNOLOGY_LTE_CA,
-            ServiceState.RIL_RADIO_TECHNOLOGY_IWLAN
+            ServiceState.RIL_RADIO_TECHNOLOGY_IWLAN,
+            ServiceState.RIL_RADIO_TECHNOLOGY_NR
     };
 
     /**
