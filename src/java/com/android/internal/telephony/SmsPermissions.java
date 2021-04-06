@@ -133,7 +133,7 @@ public class SmsPermissions {
         // Allow it to the default SMS app always.
         if (!isCallerDefaultSmsPackage(callingPackage)) {
             TelephonyPermissions
-                        .enforeceCallingOrSelfReadPrivilegedPhoneStatePermissionOrCarrierPrivilege(
+                        .enforceCallingOrSelfReadPrivilegedPhoneStatePermissionOrCarrierPrivilege(
                                 mContext, mPhone.getSubId(), message);
         }
         return true;
