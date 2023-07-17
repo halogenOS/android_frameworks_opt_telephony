@@ -242,7 +242,12 @@ public class DataEvaluation {
         /** Tracking area code changed. */
         TAC_CHANGED(true),
         /** Unsatisfied network request detached. */
-        UNSATISFIED_REQUEST_DETACHED(true);
+        UNSATISFIED_REQUEST_DETACHED(true),
+        /**
+         * After DDS switch is complete, re-evaluate if any unsatisfied network requests
+         * are honor.
+         */
+        DDS_SWITCHED(true);
 
         /**
          * {@code true} if the evaluation is due to environmental changes (i.e. SIM removal,
