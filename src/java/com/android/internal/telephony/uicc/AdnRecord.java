@@ -310,6 +310,7 @@ public class AdnRecord implements Parcelable {
                 arrayCompareNullEqualsEmpty(mEmails, adn.mEmails) &&
                 arrayCompareNullEqualsEmpty(mAdditionalNumbers, adn.mAdditionalNumbers));
     }
+
     //***** Parcelable Implementation
 
     @Override

@@ -53,6 +53,7 @@ import com.android.internal.telephony.uicc.IccFileHandler;
 import com.android.internal.telephony.uicc.IccUtils;
 import com.android.internal.telephony.uicc.UiccController;
 import com.android.internal.telephony.uicc.UiccProfile;
+import com.android.internal.telephony.uicc.IccRecords;
 import com.android.internal.util.HexDump;
 import com.android.telephony.Rlog;
 
@@ -158,8 +159,9 @@ public class IccSmsInterfaceManager {
     protected IccSmsInterfaceManager(Phone phone) {
         this(phone, phone.getContext(),
                 (AppOpsManager) phone.getContext().getSystemService(Context.APP_OPS_SERVICE),
-                new SmsDispatchersController(
-                        phone, phone.mSmsStorageMonitor, phone.mSmsUsageMonitor),
+                TelephonyComponentFactory.getInstance().inject(
+                        SmsDispatchersController.class.getName())
+                        .makeSmsDispatchersController(phone),
                 new SmsPermissions(phone, phone.getContext(),
                         (AppOpsManager) phone.getContext().getSystemService(
                                 Context.APP_OPS_SERVICE)));

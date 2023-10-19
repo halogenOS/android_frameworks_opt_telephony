@@ -92,6 +92,7 @@ import com.android.internal.telephony.PhoneFactory;
 import com.android.internal.telephony.RIL;
 import com.android.internal.telephony.data.DataConfigManager.DataConfigManagerCallback;
 import com.android.internal.telephony.data.DataEvaluation.DataAllowedReason;
+import com.android.internal.telephony.TelephonyComponentFactory;
 import com.android.internal.telephony.data.DataNetworkController.NetworkRequestList;
 import com.android.internal.telephony.data.DataRetryManager.DataHandoverRetryEntry;
 import com.android.internal.telephony.data.DataRetryManager.DataRetryEntry;
@@ -926,9 +927,8 @@ public class DataNetwork extends StateMachine {
         mDataAllowedReason = dataAllowedReason;
         dataProfile.setLastSetupTimestamp(SystemClock.elapsedRealtime());
         mAttachedNetworkRequestList.addAll(networkRequestList);
-        for (int transportType : mAccessNetworksManager.getAvailableTransports()) {
-            mCid.put(transportType, INVALID_CID);
-        }
+        mCid.put(AccessNetworkConstants.TRANSPORT_TYPE_WWAN, INVALID_CID);
+        mCid.put(AccessNetworkConstants.TRANSPORT_TYPE_WLAN, INVALID_CID);
         mTelephonyDisplayInfo = mPhone.getDisplayInfoController().getTelephonyDisplayInfo();
         mTcpBufferSizes = mDataConfigManager.getTcpConfigString(mTelephonyDisplayInfo);
 
@@ -1019,7 +1019,9 @@ public class DataNetwork extends StateMachine {
         final NetworkProvider provider = (null == factory) ? null : factory.getProvider();
 
         mNetworkScore = getNetworkScore();
-        return new TelephonyNetworkAgent(mPhone, getHandler().getLooper(), this,
+        return TelephonyComponentFactory.getInstance().inject(
+                TelephonyNetworkAgent.class.getName()).makeTelephonyNetworkAgent(
+                mPhone, getHandler().getLooper(), this,
                 new NetworkScore.Builder().setLegacyInt(mNetworkScore).build(),
                 configBuilder.build(), provider,
                 new TelephonyNetworkAgentCallback(getHandler()::post) {
@@ -1519,6 +1521,9 @@ public class DataNetwork extends StateMachine {
             sendMessageDelayed(EVENT_STUCK_IN_TRANSIENT_STATE,
                     mDataConfigManager.getAnomalyNetworkDisconnectingTimeoutMs());
             notifyPreciseDataConnectionState();
+            // Once enters disconnecting, cancel teardown delay becuase it doesn't make sense to
+            // reset sockets after data network is torn down.
+            mNetworkAgent.clearTeardownDelay();
         }
 
         @Override
@@ -1742,7 +1747,9 @@ public class DataNetwork extends StateMachine {
             int preferredDataPhoneId = PhoneSwitcher.getInstance().getPreferredDataPhoneId();
             if (preferredDataPhoneId != SubscriptionManager.INVALID_PHONE_INDEX
                     && preferredDataPhoneId != mPhone.getPhoneId()) {
-                tearDown(TEAR_DOWN_REASON_PREFERRED_DATA_SWITCHED);
+                // Let Connectivity release this immediately after linger time expires.
+                log("Unregistering TNA-" + mNetworkAgent.getId());
+                mNetworkAgent.unregister();
             }
         }
     }
@@ -2400,11 +2407,7 @@ public class DataNetwork extends StateMachine {
         mTrafficDescriptors.clear();
         mTrafficDescriptors.addAll(response.getTrafficDescriptors());
 
-        mQosBearerSessions.clear();
-        mQosBearerSessions.addAll(response.getQosBearerSessions());
-        if (mQosCallbackTracker != null) {
-            mQosCallbackTracker.updateSessions(mQosBearerSessions);
-        }
+        updateQosBearerSessions(response.getQosBearerSessions());
 
         if (!linkProperties.equals(mLinkProperties)) {
             // If the new link properties is not compatible (e.g. IP changes, interface changes),
@@ -2425,6 +2428,20 @@ public class DataNetwork extends StateMachine {
         }
 
         updateNetworkCapabilities();
+    }
+
+    /**
+     * Update QoS bearer sessions based on the latest list of {@link QosBearerSession}.
+     *
+     * @param qosBearerSessions The list of QoS bearer sessions from data service.
+     */
+    public void updateQosBearerSessions(@NonNull List<QosBearerSession> qosBearerSessions) {
+        log("updateQosBearerSessions: " + qosBearerSessions);
+        mQosBearerSessions.clear();
+        mQosBearerSessions.addAll(qosBearerSessions);
+        if (mQosCallbackTracker != null) {
+            mQosCallbackTracker.updateSessions(mQosBearerSessions);
+        }
     }
 
     /**
@@ -2701,7 +2718,10 @@ public class DataNetwork extends StateMachine {
                 validateDataCallResponse(response, false /*isSetupResponse*/);
                 mDataCallResponse = response;
                 if (response.getLinkStatus() != DataCallResponse.LINK_STATUS_INACTIVE) {
-                    updateDataNetwork(response);
+                    DataCallResponse dataCallResponse = mDataServiceManagers.get(mTransport)
+                            .appendQosParamsToDataCallResponseIfNeeded(
+                            mCid.get(mTransport), mDataProfile, response);
+                    updateDataNetwork(dataCallResponse);
                 } else {
                     log("onDataStateChanged: PDN inactive reported by "
                             + AccessNetworkConstants.transportTypeToString(mTransport)
@@ -3243,13 +3263,7 @@ public class DataNetwork extends StateMachine {
             TelephonyNetworkRequest networkRequest = mAttachedNetworkRequestList.get(0);
             DataProfile dataProfile = mDataNetworkController.getDataProfileManager()
                     .getDataProfileForNetworkRequest(networkRequest, targetNetworkType, false);
-            // Some carriers have different profiles between cellular and IWLAN. We need to
-            // dynamically switch profile, but only when those profiles have same APN name.
-            if (dataProfile != null && dataProfile.getApnSetting() != null
-                    && mDataProfile.getApnSetting() != null
-                    && TextUtils.equals(dataProfile.getApnSetting().getApnName(),
-                    mDataProfile.getApnSetting().getApnName())
-                    && !dataProfile.equals(mDataProfile)) {
+            if (dataProfile != null) {
                 mHandoverDataProfile = dataProfile;
                 log("Used different data profile for handover. " + mDataProfile);
             }

@@ -17,7 +17,6 @@
 package com.android.internal.telephony;
 
 import static com.android.internal.telephony.TelephonyStatsLog.CELLULAR_SERVICE_STATE__FOLD_STATE__STATE_UNKNOWN;
-
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -752,6 +751,9 @@ public abstract class TelephonyTest {
         mServiceManagerMockedServices.put("package", mMockPackageManager);
         mServiceManagerMockedServices.put("legacy_permission", mMockLegacyPermissionManager);
         logd("mMockLegacyPermissionManager replaced");
+        doReturn(new int[]{AccessNetworkConstants.TRANSPORT_TYPE_WWAN,
+                AccessNetworkConstants.TRANSPORT_TYPE_WLAN})
+                .when(mAccessNetworksManager).getAvailableTransports();
         doReturn(new int[]{AccessNetworkConstants.TRANSPORT_TYPE_WWAN,
                 AccessNetworkConstants.TRANSPORT_TYPE_WLAN})
                 .when(mAccessNetworksManager).getAvailableTransports();

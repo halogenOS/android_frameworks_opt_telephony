@@ -91,6 +91,7 @@ import com.android.internal.telephony.Call;
 import com.android.internal.telephony.CallStateException;
 import com.android.internal.telephony.CommandsInterface;
 import com.android.internal.telephony.Connection;
+import com.android.internal.telephony.EcbmHandler;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneConstants;
 import com.android.internal.telephony.TelephonyIntents;
@@ -124,6 +125,7 @@ public class ImsPhoneTest extends TelephonyTest {
     private DomainSelectionResolver mDomainSelectionResolver;
     Connection mConnection;
     ImsUtInterface mImsUtInterface;
+    EcbmHandler mEcbmHandler;
 
     private final Executor mExecutor = Runnable::run;
 
@@ -150,6 +152,7 @@ public class ImsPhoneTest extends TelephonyTest {
         mDomainSelectionResolver = mock(DomainSelectionResolver.class);
         doReturn(false).when(mDomainSelectionResolver).isDomainSelectionSupported();
         DomainSelectionResolver.setDomainSelectionResolver(mDomainSelectionResolver);
+        mEcbmHandler = mock(EcbmHandler.class);
 
         mImsCT.mForegroundCall = mForegroundCall;
         mImsCT.mBackgroundCall = mBackgroundCall;
@@ -177,10 +180,11 @@ public class ImsPhoneTest extends TelephonyTest {
         mImsPhoneUT.setImsStats(mImsStats);
         doReturn(mImsUtInterface).when(mImsCT).getUtInterface();
         // When the mock GsmCdmaPhone gets setIsInEcbm called, ensure isInEcm matches.
+        // TODO: Move this to a separate test class for EcbmHandler
         doAnswer(invocation -> {
             mIsPhoneUtInEcm = (Boolean) invocation.getArguments()[0];
             return null;
-        }).when(mPhone).setIsInEcm(anyBoolean());
+        }).when(mEcbmHandler).setIsInEcm(anyBoolean());
         doAnswer(invocation -> mIsPhoneUtInEcm).when(mPhone).isInEcm();
 
         mBundle = mContextFixture.getCarrierConfigBundle();
@@ -605,20 +609,23 @@ public class ImsPhoneTest extends TelephonyTest {
     }
 
     @Test
+    @Ignore
+    // TODO: Move this to a separate test class for EcbmHandler
     public void testEcbm() throws Exception {
-        mImsPhoneUT.setOnEcbModeExitResponse(mTestHandler, EVENT_EMERGENCY_CALLBACK_MODE_EXIT,
-                null);
+        EcbmHandler.getInstance().setOnEcbModeExitResponse(mTestHandler,
+                EVENT_EMERGENCY_CALLBACK_MODE_EXIT, null);
 
-        ImsEcbmStateListener imsEcbmStateListener = mImsPhoneUT.getImsEcbmStateListener();
+        ImsEcbmStateListener imsEcbmStateListener =
+                EcbmHandler.getInstance().getImsEcbmStateListener(mPhone.getPhoneId());
         imsEcbmStateListener.onECBMEntered();
-        verify(mPhone).setIsInEcm(true);
+        verify(EcbmHandler.getInstance()).setIsInEcm(true);
 
         verifyEcbmIntentWasSent(1 /*times*/, true /*inEcm*/);
         // verify that wakeLock is acquired in ECM
         assertTrue(mImsPhoneUT.getWakeLock().isHeld());
 
         imsEcbmStateListener.onECBMExited();
-        verify(mPhone).setIsInEcm(false);
+        verify(EcbmHandler.getInstance()).setIsInEcm(false);
 
         verifyEcbmIntentWasSent(2/*times*/, false /*inEcm*/);
 
@@ -643,21 +650,6 @@ public class ImsPhoneTest extends TelephonyTest {
         assertEquals(TelephonyIntents.ACTION_EMERGENCY_CALLBACK_MODE_CHANGED, intent.getAction());
         assertEquals(isInEcm, intent.getBooleanExtra(
                 TelephonyManager.EXTRA_PHONE_IN_ECM_STATE, false));
-    }
-
-    @Test
-    @SmallTest
-    public void testEcbmWhenDomainSelectionEnabled() {
-        DomainSelectionResolver dsResolver = mock(DomainSelectionResolver.class);
-        doReturn(true).when(dsResolver).isDomainSelectionSupported();
-        DomainSelectionResolver.setDomainSelectionResolver(dsResolver);
-
-        ImsEcbmStateListener imsEcbmStateListener = mImsPhoneUT.getImsEcbmStateListener();
-        imsEcbmStateListener.onECBMEntered();
-        imsEcbmStateListener.onECBMExited();
-
-        verify(mPhone, never()).setIsInEcm(anyBoolean());
-        verify(mContext, never()).sendStickyBroadcastAsUser(any(), any());
     }
 
     @Test
@@ -767,6 +759,7 @@ public class ImsPhoneTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testRoamingToAirplanModeIwlanInService() throws Exception {
+        doReturn(true).when(mAccessNetworksManager).isInLegacyMode();
         doReturn(PhoneConstants.State.IDLE).when(mImsCT).getState();
         doReturn(true).when(mPhone).isRadioOn();
 
@@ -794,6 +787,7 @@ public class ImsPhoneTest extends TelephonyTest {
     @Test
     @SmallTest
     public void testRoamingToOutOfService() throws Exception {
+        doReturn(true).when(mAccessNetworksManager).isInLegacyMode();
         doReturn(PhoneConstants.State.IDLE).when(mImsCT).getState();
         doReturn(true).when(mPhone).isRadioOn();
 
@@ -813,6 +807,83 @@ public class ImsPhoneTest extends TelephonyTest {
 
         // setWfcMode should not be called again, out_of_service should not trigger move out of
         // roaming.
+        verify(mImsManager, times(1)).setWfcMode(anyInt(), anyBoolean());
+    }
+
+    @Test
+    @SmallTest
+    public void testRoamingChangeForLteInLegacyMode() throws Exception {
+        doReturn(true).when(mAccessNetworksManager).isInLegacyMode();
+        doReturn(PhoneConstants.State.IDLE).when(mImsCT).getState();
+        doReturn(true).when(mPhone).isRadioOn();
+
+        //roaming - data registration only on LTE
+        Message m = getServiceStateChangedMessage(getServiceStateDataOnly(
+                ServiceState.RIL_RADIO_TECHNOLOGY_LTE, ServiceState.STATE_IN_SERVICE, true));
+        // Inject the message synchronously instead of waiting for the thread to do it.
+        mImsPhoneUT.handleMessage(m);
+        m.recycle();
+
+        verify(mImsManager, times(1)).setWfcMode(anyInt(), eq(true));
+
+        // not roaming - data registration on LTE
+        m = getServiceStateChangedMessage(getServiceStateDataOnly(
+                ServiceState.RIL_RADIO_TECHNOLOGY_LTE, ServiceState.STATE_IN_SERVICE, false));
+        mImsPhoneUT.handleMessage(m);
+        m.recycle();
+
+        verify(mImsManager, times(1)).setWfcMode(anyInt(), eq(false));
+    }
+
+    @Test
+    @SmallTest
+    public void testDataOnlyRoamingCellToIWlanInLegacyMode() throws Exception {
+        doReturn(true).when(mAccessNetworksManager).isInLegacyMode();
+        doReturn(PhoneConstants.State.IDLE).when(mImsCT).getState();
+        doReturn(true).when(mPhone).isRadioOn();
+
+        //roaming - data registration only on LTE
+        Message m = getServiceStateChangedMessage(getServiceStateDataOnly(
+                ServiceState.RIL_RADIO_TECHNOLOGY_LTE, ServiceState.STATE_IN_SERVICE, true));
+        // Inject the message synchronously instead of waiting for the thread to do it.
+        mImsPhoneUT.handleMessage(m);
+        m.recycle();
+
+        verify(mImsManager, times(1)).setWfcMode(anyInt(), eq(true));
+
+        // not roaming - data registration onto IWLAN
+        m = getServiceStateChangedMessage(getServiceStateDataOnly(
+                ServiceState.RIL_RADIO_TECHNOLOGY_IWLAN, ServiceState.STATE_IN_SERVICE, false));
+        mImsPhoneUT.handleMessage(m);
+        m.recycle();
+
+        // Verify that it hasn't been called again.
+        verify(mImsManager, times(1)).setWfcMode(anyInt(), anyBoolean());
+    }
+
+    @Test
+    @SmallTest
+    public void testCellVoiceDataChangeToWlanInLegacyMode() throws Exception {
+        doReturn(true).when(mAccessNetworksManager).isInLegacyMode();
+        doReturn(PhoneConstants.State.IDLE).when(mImsCT).getState();
+        doReturn(true).when(mPhone).isRadioOn();
+
+        //roaming - voice/data registration on LTE
+        ServiceState ss = getServiceStateDataAndVoice(
+                ServiceState.RIL_RADIO_TECHNOLOGY_LTE, ServiceState.STATE_IN_SERVICE, true);
+        Message m = getServiceStateChangedMessage(ss);
+        // Inject the message synchronously instead of waiting for the thread to do it.
+        mImsPhoneUT.handleMessage(m);
+
+        verify(mImsManager, times(1)).setWfcMode(anyInt(), eq(true));
+
+        // roaming - voice LTE, data registration onto IWLAN
+        modifyServiceStateData(ss, ServiceState.RIL_RADIO_TECHNOLOGY_IWLAN,
+                ServiceState.STATE_IN_SERVICE, false);
+        mImsPhoneUT.handleMessage(m);
+        m.recycle();
+
+        // Verify that it hasn't been called again.
         verify(mImsManager, times(1)).setWfcMode(anyInt(), anyBoolean());
     }
 

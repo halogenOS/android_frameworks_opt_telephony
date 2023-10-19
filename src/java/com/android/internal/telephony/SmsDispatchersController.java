@@ -107,7 +107,7 @@ public class SmsDispatchersController extends Handler {
 
     private SMSDispatcher mCdmaDispatcher;
     private SMSDispatcher mGsmDispatcher;
-    private ImsSmsDispatcher mImsSmsDispatcher;
+    protected ImsSmsDispatcher mImsSmsDispatcher;
 
     private GsmInboundSmsHandler mGsmInboundSmsHandler;
     private CdmaInboundSmsHandler mCdmaInboundSmsHandler;
@@ -700,7 +700,7 @@ public class SmsDispatchersController extends Handler {
     public void sendRetrySms(SMSDispatcher.SmsTracker tracker) {
         boolean retryUsingImsService = false;
 
-        if (!tracker.mUsesImsServiceForIms) {
+        if (!tracker.mUsesImsServiceForIms && !tracker.mIsFallBackRetry) {
             if (mDomainSelectionResolverProxy.isDomainSelectionSupported()) {
                 DomainSelectionConnectionHolder holder = getDomainSelectionConnection(false);
 
@@ -1712,7 +1712,7 @@ public class SmsDispatchersController extends Handler {
             }
         }
 
-        if (mImsSmsDispatcher.isAvailable()) {
+        if (mImsSmsDispatcher.isAvailable() || mImsSmsDispatcher.isEmergencySmsSupport(destAddr)) {
             mImsSmsDispatcher.sendMultipartText(destAddr, scAddr, parts, sentIntents,
                     deliveryIntents, messageUri, callingPkg, persistMessage, priority,
                     false /*expectMore*/, validityPeriod, messageId);

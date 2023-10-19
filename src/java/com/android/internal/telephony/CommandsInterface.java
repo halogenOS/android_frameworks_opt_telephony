@@ -14,6 +14,13 @@
  * limitations under the License.
  */
 
+/*
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ *
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 package com.android.internal.telephony;
 
 import android.annotation.NonNull;
@@ -84,6 +91,7 @@ public interface CommandsInterface {
     static final int CF_REASON_NOT_REACHABLE    = 3;
     static final int CF_REASON_ALL              = 4;
     static final int CF_REASON_ALL_CONDITIONAL  = 5;
+    static final int CF_REASON_NOT_LOGGED_IN    = 6;
 
     // Used for call barring methods below
     static final String CB_FACILITY_BAOC         = "AO";
@@ -1448,6 +1456,14 @@ public interface CommandsInterface {
      */
     @UnsupportedAppUsage
     void setNetworkSelectionModeManual(String operatorNumeric, int ran, Message response);
+
+    /**
+     * Ask the radio to connect to the input network with specific RadioAccessNetwork
+     * and change selection mode to manual.
+     * @param network Oprator information
+     * @param response callback message.
+     */
+    void setNetworkSelectionModeManual(OperatorInfo network, Message response);
 
     /**
      * Queries whether the current network selection mode is automatic
@@ -3276,4 +3292,11 @@ public interface CommandsInterface {
      * @param h Handler to be removed from the registrant list.
      */
     default void unregisterForSatelliteProvisionStateChanged(@NonNull Handler h) {}
+
+    /**
+     *  Get phone radio capability
+     *
+     *  @param result Callback message.
+     */
+    public void getEnhancedRadioCapability(Message result);
 }

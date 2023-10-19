@@ -21,6 +21,7 @@ import android.content.ContentValues;
 import android.content.pm.PackageManager;
 import android.os.AsyncResult;
 import android.os.Build;
+import android.os.HandlerThread;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
@@ -61,9 +62,9 @@ public class IccPhoneBookInterfaceManager {
     protected static final int EVENT_LOAD_DONE = 2;
     protected static final int EVENT_UPDATE_DONE = 3;
 
-    private static final class Request {
+    public static final class Request {
         AtomicBoolean mStatus = new AtomicBoolean(false);
-        Object mResult = null;
+        public Object mResult = null;
     }
 
     @UnsupportedAppUsage
@@ -388,7 +389,7 @@ public class IccPhoneBookInterfaceManager {
     }
 
     @UnsupportedAppUsage
-    private int updateEfForIccType(int efid) {
+    protected int updateEfForIccType(int efid) {
         // Check if we are trying to read ADN records
         if (efid == IccConstants.EF_ADN) {
             if (mPhone.getCurrentUiccAppType() == AppType.APPTYPE_USIM) {
@@ -398,11 +399,18 @@ public class IccPhoneBookInterfaceManager {
         return efid;
     }
 
+    protected String[] getStringArray(String str) {
+        if (str != null) {
+            return str.split(",");
+        }
+        return null;
+    }
+
     private String[] getEmailStringArray(String str) {
         return str != null ? str.split(",") : null;
     }
 
-    private String[] getAnrStringArray(String str) {
+    protected String[] getAnrStringArray(String str) {
         return str != null ? str.split(":") : null;
     }
 

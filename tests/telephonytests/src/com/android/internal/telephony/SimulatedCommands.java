@@ -14,6 +14,13 @@
  * limitations under the License.
  */
 
+/*
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ *
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 package com.android.internal.telephony.test;
 
 import android.compat.annotation.UnsupportedAppUsage;
@@ -62,6 +69,7 @@ import com.android.internal.telephony.CallFailCause;
 import com.android.internal.telephony.CommandException;
 import com.android.internal.telephony.CommandsInterface;
 import com.android.internal.telephony.LastCallFailCause;
+import com.android.internal.telephony.OperatorInfo;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneConstants;
 import com.android.internal.telephony.RILUtils;
@@ -184,6 +192,7 @@ public class SimulatedCommands extends BaseCommands
     private SetupDataCallResult mSetupDataCallResult;
     private boolean mIsRadioPowerFailResponse = false;
     private boolean mIsReportSmsMemoryStatusFailResponse = false;
+    private String smscAddress;
 
     public boolean mSetRadioPowerForEmergencyCall;
     public boolean mSetRadioPowerAsSelectedPhoneForEmergencyCall;
@@ -1118,6 +1127,7 @@ public class SimulatedCommands extends BaseCommands
      */
     @Override
     public void startDtmf(char c, Message result) {
+        SimulatedCommandsVerifier.getInstance().startDtmf(c, result);
         resultSuccess(result, null);
     }
 
@@ -1299,13 +1309,15 @@ public class SimulatedCommands extends BaseCommands
     public void getSmscAddress(Message result) {
         SimulatedCommandsVerifier.getInstance().getSmscAddress(result);
         if (mSendGetSmscAddressResponse) {
-            unimplemented(result);
+            resultSuccess(result, smscAddress);
         }
     }
 
     @Override
     public void setSmscAddress(String address, Message result) {
-        unimplemented(result);
+        smscAddress = address;
+        resultSuccess(result, null);
+        SimulatedCommandsVerifier.getInstance().setSmscAddress(address, result);
     }
 
     @Override
@@ -1511,6 +1523,10 @@ public class SimulatedCommands extends BaseCommands
         SimulatedCommandsVerifier.getInstance().setNetworkSelectionModeManual(
                 operatorNumeric, ran, result);
         mMockNetworkSelectionMode = 1;
+    }
+    @Override
+    public void setNetworkSelectionModeManual(OperatorInfo network, Message result) {
+        unimplemented(result);
     }
 
     /**

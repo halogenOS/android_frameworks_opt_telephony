@@ -51,7 +51,6 @@ import androidx.test.InstrumentationRegistry;
 
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneFactory;
-import com.android.internal.telephony.ServiceStateTracker;
 import com.android.internal.telephony.TelephonyTest;
 
 import com.google.i18n.phonenumbers.ShortNumberInfo;

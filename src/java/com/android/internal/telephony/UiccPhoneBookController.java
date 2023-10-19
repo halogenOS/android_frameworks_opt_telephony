@@ -113,6 +113,11 @@ public class UiccPhoneBookController extends IIccPhoneBook.Stub {
     }
 
     @Override
+    public AdnCapacity getAdnRecordsCapacity() throws android.os.RemoteException {
+        return getAdnRecordsCapacityForSubscriber(getDefaultSubscription());
+    }
+
+    @Override
     public AdnCapacity getAdnRecordsCapacityForSubscriber(int subId)
            throws android.os.RemoteException {
         IccPhoneBookInterfaceManager iccPbkIntMgr = getIccPhoneBookInterfaceManager(subId);

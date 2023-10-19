@@ -56,6 +56,7 @@ import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneConstants;
 import com.android.internal.telephony.UUSInfo;
 import com.android.internal.telephony.emergency.EmergencyNumberTracker;
+import com.android.internal.telephony.imsphone.ImsPhone.ImsDialArgs.DeferDial;
 import com.android.internal.telephony.metrics.TelephonyMetrics;
 import com.android.telephony.Rlog;
 
@@ -82,7 +83,7 @@ public class ImsPhoneConnection extends Connection implements
     private ImsPhoneCall mParent;
     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
     private ImsCall mImsCall;
-    private Bundle mExtras = new Bundle();
+    private final Bundle mExtras = new Bundle();
     private TelephonyMetrics mMetrics = TelephonyMetrics.getInstance();
 
     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
@@ -156,6 +157,10 @@ public class ImsPhoneConnection extends Connection implements
      * Used to indicate that this call is held by remote party.
      */
     private boolean mIsHeldByRemote = false;
+
+    // Indicates whether dial needs to be deferred. By default, value
+    // is INVALID meaning do not defer dial
+    private DeferDial mDeferDial = DeferDial.INVALID;
 
     //***** Event Constants
     private static final int EVENT_DTMF_DONE = 1;
@@ -361,6 +366,10 @@ public class ImsPhoneConnection extends Connection implements
                 capabilities = addCapability(capabilities,
                         Connection.Capability.SUPPORTS_VT_LOCAL_BIDIRECTIONAL);
                 break;
+            case ImsCallProfile.CALL_TYPE_VT_NODIR:
+                capabilities = removeCapability(capabilities,
+                        Connection.Capability.SUPPORTS_DOWNGRADE_TO_VOICE_LOCAL);
+                break;
         }
         return capabilities;
     }
@@ -379,6 +388,14 @@ public class ImsPhoneConnection extends Connection implements
                 capabilities = addCapability(capabilities,
                         Connection.Capability.SUPPORTS_VT_REMOTE_BIDIRECTIONAL);
                 break;
+            case ImsCallProfile.CALL_TYPE_VT_NODIR:
+                capabilities = removeCapability(capabilities,
+                        Connection.Capability.SUPPORTS_DOWNGRADE_TO_VOICE_REMOTE);
+                break;
+        }
+
+        if (remoteProfile.getMediaProfile().getRttMode() == ImsStreamMediaProfile.RTT_MODE_FULL) {
+            capabilities = addCapability(capabilities, Connection.Capability.SUPPORTS_RTT_REMOTE);
         }
 
         if (remoteProfile.getMediaProfile().getRttMode() == ImsStreamMediaProfile.RTT_MODE_FULL) {
@@ -482,14 +499,28 @@ public class ImsPhoneConnection extends Connection implements
         }
     }
 
+    private boolean canTransfer(ImsPhoneConnection connection) {
+        ImsCall bgImsCall = connection != null ? connection.getImsCall() : null;
+        return (mImsCall != null && mParent != null
+                && mParent.getState() == ImsPhoneCall.State.ACTIVE && bgImsCall != null
+                && connection.mParent != null
+                && connection.mParent.getState() == ImsPhoneCall.State.HOLDING);
+    }
+
     @Override
     public void consultativeTransfer(Connection other) throws CallStateException {
+        ImsPhoneConnection bgConnection = (ImsPhoneConnection) other;
+        ImsCall bgImsCall = bgConnection != null ? bgConnection.getImsCall() : null;
+
+        if (!canTransfer(bgConnection)) {
+            throw new CallStateException("no valid ims call to transfer");
+        }
+
         try {
-            if (mImsCall != null) {
-                mImsCall.consultativeTransfer(((ImsPhoneConnection) other).getImsCall());
-            } else {
-                throw new CallStateException("no valid ims call to transfer");
-            }
+            // Per 3GPP TS 24.629 - A.2, the signalling for a consultative transfer should send the
+            // REFER on the background held call with the foreground call specified as the
+            // destination.
+            bgImsCall.consultativeTransfer(mImsCall);
         } catch (ImsException e) {
             throw new CallStateException("cannot transfer call");
         }
@@ -1491,7 +1522,10 @@ public class ImsPhoneConnection extends Connection implements
      * @return boolean: true if cross sim calling, false otherwise
      */
     public boolean isCrossSimCall() {
-        return mImsCall != null && mImsCall.isCrossSimCall();
+        if (mImsCall == null) {
+            return mExtras.getBoolean(ImsCallProfile.EXTRA_IS_CROSS_SIM_CALL);
+        }
+        return mImsCall.isCrossSimCall();  
     }
 
     /**
@@ -1712,5 +1746,13 @@ public class ImsPhoneConnection extends Connection implements
             return 1;
         }
         return 0;
+    }
+
+    public void setDeferDialStatus(DeferDial deferDial) {
+        mDeferDial = deferDial;
+    }
+
+    public DeferDial getDeferDialStatus() {
+        return mDeferDial;
     }
 }

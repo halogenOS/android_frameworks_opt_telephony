@@ -124,11 +124,12 @@ public class DataRetryManager extends Handler {
                     RESET_REASON_DATA_SERVICE_BOUND,
                     RESET_REASON_DATA_CONFIG_CHANGED,
                     RESET_REASON_TAC_CHANGED,
+                    RESET_REASON_DATA_ENABLED_CHANGED,
             })
     public @interface RetryResetReason {}
 
     /** Reset due to data profiles changed. */
-    private static final int RESET_REASON_DATA_PROFILES_CHANGED = 1;
+    protected static final int RESET_REASON_DATA_PROFILES_CHANGED = 1;
 
     /** Reset due to radio on. This could happen after airplane mode off or RIL restarted. */
     private static final int RESET_REASON_RADIO_ON = 2;
@@ -143,13 +144,16 @@ public class DataRetryManager extends Handler {
     private static final int RESET_REASON_DATA_SERVICE_BOUND = 4;
 
     /** Reset due to data config changed. */
-    private static final int RESET_REASON_DATA_CONFIG_CHANGED = 5;
+    protected static final int RESET_REASON_DATA_CONFIG_CHANGED = 5;
 
     /** Reset due to tracking area code changed. */
     private static final int RESET_REASON_TAC_CHANGED = 6;
 
+    /** Reset due to data enabled changed. */
+    protected static final int RESET_REASON_DATA_ENABLED_CHANGED = 7;
+
     /** The phone instance. */
-    private final @NonNull Phone mPhone;
+    protected final @NonNull Phone mPhone;
 
     /** The RIL instance. */
     private final @NonNull CommandsInterface mRil;
@@ -173,7 +177,10 @@ public class DataRetryManager extends Handler {
     private @NonNull SparseArray<DataServiceManager> mDataServiceManagers;
 
     /** Data config manager instance. */
-    private final @NonNull DataConfigManager mDataConfigManager;
+    protected final @NonNull DataConfigManager mDataConfigManager;
+
+    /** Data network controller instance. */
+    protected final @NonNull DataNetworkController mDataNetworkController;
 
     /** Data profile manager. */
     private final @NonNull DataProfileManager mDataProfileManager;
@@ -970,19 +977,20 @@ public class DataRetryManager extends Handler {
         mDataRetryManagerCallbacks.add(dataRetryManagerCallback);
 
         mDataServiceManagers = dataServiceManagers;
-        mDataConfigManager = dataNetworkController.getDataConfigManager();
-        mDataProfileManager = dataNetworkController.getDataProfileManager();
+        mDataNetworkController = dataNetworkController;
+        mDataConfigManager = mDataNetworkController.getDataConfigManager();
+        mDataProfileManager = mDataNetworkController.getDataProfileManager();
         mAlarmManager = mPhone.getContext().getSystemService(AlarmManager.class);
-
         mDataConfigManager.registerCallback(new DataConfigManagerCallback(this::post) {
             @Override
             public void onCarrierConfigChanged() {
                 DataRetryManager.this.onCarrierConfigUpdated();
             }
         });
-
-        for (int transport : mPhone.getAccessNetworksManager().getAvailableTransports()) {
-            mDataServiceManagers.get(transport)
+        mDataServiceManagers.get(AccessNetworkConstants.TRANSPORT_TYPE_WWAN)
+                .registerForApnUnthrottled(this, EVENT_DATA_PROFILE_UNTHROTTLED);
+        if (!mPhone.getAccessNetworksManager().isInLegacyMode()) {
+            mDataServiceManagers.get(AccessNetworkConstants.TRANSPORT_TYPE_WLAN)
                     .registerForApnUnthrottled(this, EVENT_DATA_PROFILE_UNTHROTTLED);
         }
         mDataProfileManager.registerCallback(new DataProfileManagerCallback(this::post) {
@@ -1143,7 +1151,7 @@ public class DataRetryManager extends Handler {
                 retryDelayMillis));
     }
 
-    private void onEvaluateDataSetupRetry(@NonNull DataProfile dataProfile,
+    protected void onEvaluateDataSetupRetry(@NonNull DataProfile dataProfile,
             @TransportType int transport, @NonNull NetworkRequestList requestList,
             @DataFailureCause int cause, long retryDelayMillis) {
         logl("onEvaluateDataSetupRetry: " + dataProfile + ", transport="
@@ -1353,10 +1361,13 @@ public class DataRetryManager extends Handler {
     }
 
     /** Cancel all retries and throttling entries. */
-    private void onReset(@RetryResetReason int reason) {
+    protected void onReset(@RetryResetReason int reason) {
         logl("Remove all retry and throttling entries, reason=" + resetReasonToString(reason));
         removeMessages(EVENT_DATA_SETUP_RETRY);
         removeMessages(EVENT_DATA_HANDOVER_RETRY);
+
+        mDataProfileManager.clearAllDataProfilePermanentFailures();
+
         mDataRetryEntries.stream()
                 .filter(entry -> entry.getState() == DataRetryEntry.RETRY_STATE_NOT_RETRIED)
                 .forEach(entry -> entry.setState(DataRetryEntry.RETRY_STATE_CANCELLED));
@@ -1785,6 +1796,12 @@ public class DataRetryManager extends Handler {
     }
 
     /**
+     * Reset data reject count and reason on data call success
+     */
+    public void handlePdpRejectCauseSuccess() {
+    }
+
+    /**
      * Register the callback for receiving information from {@link DataRetryManager}.
      *
      * @param callback The callback.
@@ -1808,7 +1825,7 @@ public class DataRetryManager extends Handler {
      * @param reason The reason
      * @return The reason in string format.
      */
-    private static @NonNull String resetReasonToString(int reason) {
+    protected static @NonNull String resetReasonToString(int reason) {
         switch (reason) {
             case RESET_REASON_DATA_PROFILES_CHANGED:
                 return "DATA_PROFILES_CHANGED";
@@ -1822,6 +1839,8 @@ public class DataRetryManager extends Handler {
                 return "DATA_CONFIG_CHANGED";
             case RESET_REASON_TAC_CHANGED:
                 return "TAC_CHANGED";
+            case RESET_REASON_DATA_ENABLED_CHANGED:
+                return "DATA_ENABLED_CHANGED";
             default:
                 return "UNKNOWN(" + reason + ")";
         }
@@ -1831,7 +1850,7 @@ public class DataRetryManager extends Handler {
      * Log debug messages.
      * @param s debug messages
      */
-    private void log(@NonNull String s) {
+    protected void log(@NonNull String s) {
         Rlog.d(mLogTag, s);
     }
 
@@ -1839,7 +1858,7 @@ public class DataRetryManager extends Handler {
      * Log error messages.
      * @param s error messages
      */
-    private void loge(@NonNull String s) {
+    protected void loge(@NonNull String s) {
         Rlog.e(mLogTag, s);
     }
 
@@ -1847,7 +1866,7 @@ public class DataRetryManager extends Handler {
      * Log verbose messages.
      * @param s debug messages.
      */
-    private void logv(@NonNull String s) {
+    protected void logv(@NonNull String s) {
         if (VDBG) Rlog.v(mLogTag, s);
     }
 

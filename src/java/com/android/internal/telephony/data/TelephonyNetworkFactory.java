@@ -19,12 +19,14 @@ package com.android.internal.telephony.data;
 import android.net.NetworkCapabilities;
 import android.net.NetworkFactory;
 import android.net.NetworkRequest;
+import android.net.NetworkScore;
 import android.net.TelephonyNetworkSpecifier;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.telephony.AccessNetworkConstants;
 import android.telephony.SubscriptionManager;
+import android.telephony.TelephonyManager;
 import android.util.LocalLog;
 
 import com.android.internal.annotations.VisibleForTesting;
@@ -43,14 +45,14 @@ import java.util.Map;
  * service to the data network controller.
  */
 public class TelephonyNetworkFactory extends NetworkFactory {
-    public final String LOG_TAG;
+    protected String LOG_TAG;
     protected static final boolean DBG = true;
 
     private static final int REQUEST_LOG_SIZE = 256;
 
-    private static final int ACTION_NO_OP   = 0;
-    private static final int ACTION_REQUEST = 1;
-    private static final int ACTION_RELEASE = 2;
+    protected static final int ACTION_NO_OP   = 0;
+    protected static final int ACTION_REQUEST = 1;
+    protected static final int ACTION_RELEASE = 2;
 
     private static final int TELEPHONY_NETWORK_SCORE = 50;
 
@@ -61,24 +63,27 @@ public class TelephonyNetworkFactory extends NetworkFactory {
     private static final int EVENT_NETWORK_REQUEST                  = 3;
     private static final int EVENT_NETWORK_RELEASE                  = 4;
 
-    private final PhoneSwitcher mPhoneSwitcher;
+    protected final PhoneSwitcher mPhoneSwitcher;
     private final LocalLog mLocalLog = new LocalLog(REQUEST_LOG_SIZE);
 
     // Key: network request. Value: the transport of the network request applies to,
     // AccessNetworkConstants.TRANSPORT_TYPE_INVALID if not applied.
-    private final Map<TelephonyNetworkRequest, Integer> mNetworkRequests = new HashMap<>();
+    protected final Map<TelephonyNetworkRequest, Integer> mNetworkRequests = new HashMap<>();
 
-    private final Phone mPhone;
+    protected final Phone mPhone;
 
     private AccessNetworksManager mAccessNetworksManager;
 
-    private int mSubscriptionId;
+    protected int mSubscriptionId;
 
     @VisibleForTesting
-    public final Handler mInternalHandler;
+    public Handler mInternalHandler;
 
 
-    public TelephonyNetworkFactory(Looper looper, Phone phone) {
+    private static final int PRIMARY_SLOT = 0;
+    private static final int SECONDARY_SLOT = 1;
+
+    public TelephonyNetworkFactory(Looper looper, Phone phone, PhoneSwitcher phoneSwitcher) {
         super(looper, phone.getContext(), "TelephonyNetworkFactory[" + phone.getPhoneId()
                 + "]", null);
         mPhone = phone;
@@ -89,7 +94,7 @@ public class TelephonyNetworkFactory extends NetworkFactory {
         setCapabilityFilter(makeNetworkFilterByPhoneId(mPhone.getPhoneId()));
         setScoreFilter(TELEPHONY_NETWORK_SCORE);
 
-        mPhoneSwitcher = PhoneSwitcher.getInstance();
+        mPhoneSwitcher = phoneSwitcher;
         LOG_TAG = "TelephonyNetworkFactory[" + mPhone.getPhoneId() + "]";
 
         mPhoneSwitcher.registerForActivePhoneSwitch(mInternalHandler, EVENT_ACTIVE_PHONE_SWITCH,
@@ -153,8 +158,8 @@ public class TelephonyNetworkFactory extends NetworkFactory {
         return builder.build();
     }
 
-    private class InternalHandler extends Handler {
-        InternalHandler(Looper looper) {
+    protected class InternalHandler extends Handler {
+        protected InternalHandler(Looper looper) {
             super(looper);
         }
 
@@ -181,7 +186,7 @@ public class TelephonyNetworkFactory extends NetworkFactory {
         }
     }
 
-    private int getTransportTypeFromNetworkRequest(TelephonyNetworkRequest networkRequest) {
+    protected int getTransportTypeFromNetworkRequest(TelephonyNetworkRequest networkRequest) {
         int transport = AccessNetworkConstants.TRANSPORT_TYPE_WWAN;
         int capability = networkRequest.getApnTypeNetworkCapability();
         if (capability >= 0) {
@@ -191,7 +196,7 @@ public class TelephonyNetworkFactory extends NetworkFactory {
         return transport;
     }
 
-    private static int getAction(boolean wasActive, boolean isActive) {
+    protected static int getAction(boolean wasActive, boolean isActive) {
         if (!wasActive && isActive) {
             return ACTION_REQUEST;
         } else if (wasActive && !isActive) {
@@ -204,6 +209,17 @@ public class TelephonyNetworkFactory extends NetworkFactory {
     // apply or revoke requests if our active-ness changes
     private void onActivePhoneSwitch() {
         logl("onActivePhoneSwitch");
+
+        if (mSubscriptionId == SubscriptionManager.from(mPhone.getContext())
+                .getActiveDataSubscriptionId()) {
+            logl("onActivePhoneSwitch: set primary flag for phoneId: " + mPhone.getPhoneId());
+            setScoreFilter(new NetworkScore.Builder().setLegacyInt(TELEPHONY_NETWORK_SCORE)
+                    .setTransportPrimary(true).build());
+        } else {
+            setScoreFilter(new NetworkScore.Builder().setLegacyInt(TELEPHONY_NETWORK_SCORE)
+                    .setTransportPrimary(false).build());
+        }
+
         for (Map.Entry<TelephonyNetworkRequest, Integer> entry : mNetworkRequests.entrySet()) {
             TelephonyNetworkRequest networkRequest = entry.getKey();
             boolean applied = entry.getValue() != AccessNetworkConstants.TRANSPORT_TYPE_INVALID;
@@ -248,6 +264,15 @@ public class TelephonyNetworkFactory extends NetworkFactory {
         msg.sendToTarget();
     }
 
+    private boolean isNetworkCapabilityEims(NetworkRequest networkRequest) {
+        return networkRequest.hasCapability(
+            android.net.NetworkCapabilities.NET_CAPABILITY_EIMS);
+    }
+
+    private boolean isSimPresentInSecondarySlot() {
+        return TelephonyManager.getDefault().hasIccCard(SECONDARY_SLOT);
+    }
+
     private void onNeedNetworkFor(Message msg) {
         TelephonyNetworkRequest networkRequest =
                 new TelephonyNetworkRequest((NetworkRequest) msg.obj, mPhone);
@@ -277,6 +302,9 @@ public class TelephonyNetworkFactory extends NetworkFactory {
     private void onReleaseNetworkFor(Message msg) {
         TelephonyNetworkRequest networkRequest =
                 new TelephonyNetworkRequest((NetworkRequest) msg.obj, mPhone);
+        if (!mNetworkRequests.containsKey(networkRequest)) {
+            return;
+        }
         boolean applied = mNetworkRequests.get(networkRequest)
                 != AccessNetworkConstants.TRANSPORT_TYPE_INVALID;
 

@@ -1723,9 +1723,13 @@ public class DataNetworkControllerTest extends TelephonyTest {
 
     @Test
     public void testIsDataEnabledOverriddenForApnDataDuringCall() throws Exception {
-        doReturn(1).when(mPhone).getSubId();
+        // Assume phone2 is the default data phone
+        Phone phone2 = Mockito.mock(Phone.class);
+        replaceInstance(PhoneFactory.class, "sPhones", null, new Phone[]{mPhone, phone2});
         doReturn(2).when(mSubscriptionManagerService).getDefaultDataSubId();
-        // Data disabled
+        doReturn(1).when(mPhone).getSubId();
+
+        // Data disabled on nonDDS
         mDataNetworkControllerUT.getDataSettingsManager().setDataEnabled(
                 TelephonyManager.DATA_ENABLED_REASON_USER, false, mContext.getOpPackageName());
 
@@ -1745,6 +1749,8 @@ public class DataNetworkControllerTest extends TelephonyTest {
 
         // Phone ringing
         doReturn(PhoneConstants.State.RINGING).when(mPhone).getState();
+        // Data is user enabled on DDS
+        doReturn(true).when(phone2).isUserDataEnabled();
         mDataNetworkControllerUT.addNetworkRequest(
                 createNetworkRequest(NetworkCapabilities.NET_CAPABILITY_INTERNET));
         processAllMessages();
@@ -4311,6 +4317,11 @@ public class DataNetworkControllerTest extends TelephonyTest {
 
         // Simulate telephony network factory remove request due to switch.
         mDataNetworkControllerUT.removeNetworkRequest(request);
+        processAllMessages();
+
+        // Simulate Connectivity releases network.
+        List<DataNetwork> dataNetworks = getDataNetworks();
+        dataNetworks.get(0).tearDown(DataNetwork.TEAR_DOWN_REASON_CONNECTIVITY_SERVICE_UNWANTED);
         processAllMessages();
 
         // Data should be torn down on this non-preferred sub.

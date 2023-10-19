@@ -758,21 +758,23 @@ public class SubscriptionManagerService extends ISub.Stub {
     }
 
     /**
-     * @return The list of ICCIDs from the inserted physical SIMs.
+     * @return The list of ICCIDs from the inserted SIMs.
      */
     @NonNull
-    private List<String> getIccIdsOfInsertedPhysicalSims() {
+    private List<String> getIccIdsOfInsertedSims() {
         List<String> iccidList = new ArrayList<>();
         UiccSlot[] uiccSlots = mUiccController.getUiccSlots();
         if (uiccSlots == null) return iccidList;
 
         for (UiccSlot uiccSlot : uiccSlots) {
             if (uiccSlot != null && uiccSlot.getCardState() != null
-                    && uiccSlot.getCardState().isCardPresent() && !uiccSlot.isEuicc()) {
-                // Non euicc slots will have single port, so use default port index.
-                String iccId = uiccSlot.getIccId(TelephonyManager.DEFAULT_PORT_INDEX);
-                if (!TextUtils.isEmpty(iccId)) {
-                    iccidList.add(IccUtils.stripTrailingFs(iccId));
+                    && uiccSlot.getCardState().isCardPresent()) {
+                int[] portIndexes = uiccSlot.getPortList();
+                for (int portIdx : portIndexes) {
+                    String iccId = uiccSlot.getIccId(portIdx);
+                    if (!TextUtils.isEmpty(iccId)) {
+                        iccidList.add(IccUtils.stripTrailingFs(iccId));
+                    }
                 }
             }
         }
@@ -989,9 +991,10 @@ public class SubscriptionManagerService extends ISub.Stub {
                 .setType(subscriptionType)
                 .setIconTint(getColor())
                 .setAllowedNetworkTypesForReasons(defaultAllowNetworkTypes);
-        if (displayName != null) {
-            builder.setDisplayName(displayName);
+        if (TextUtils.isEmpty(displayName)) {
+            displayName = "CARD " + Integer.toString(slotIndex + 1);
         }
+        builder.setDisplayName(displayName);
 
         int subId = mSubscriptionDatabaseManager.insertSubscriptionInfo(builder.build());
         logl("insertSubscriptionInfo: Inserted a new subscription. subId=" + subId
@@ -1230,7 +1233,7 @@ public class SubscriptionManagerService extends ISub.Stub {
      * @return {@code true} if all the need-to-be-loaded subscriptions from SIM slots are already
      * loaded. {@code false} if more than one are still being loaded.
      */
-    private boolean areAllSubscriptionsLoaded() {
+    public boolean areAllSubscriptionsLoaded() {
         for (int phoneId = 0; phoneId < mTelephonyManager.getActiveModemCount(); phoneId++) {
             UiccSlot slot = mUiccController.getUiccSlotForPhone(phoneId);
             if (slot == null) {
@@ -1270,7 +1273,7 @@ public class SubscriptionManagerService extends ISub.Stub {
      *
      * @param phoneId The phone id (i.e. Logical SIM slot index)
      */
-    private void updateSubscription(int phoneId) {
+    public void updateSubscription(int phoneId) {
         int simState = mSimState[phoneId];
         log("updateSubscription: phoneId=" + phoneId + ", simState="
                 + TelephonyManager.simStateToString(simState));
@@ -1281,23 +1284,25 @@ public class SubscriptionManagerService extends ISub.Stub {
         }
 
         if (simState == TelephonyManager.SIM_STATE_ABSENT) {
-            // Re-enable the pSIM when it's removed, so it will be in enabled state when it gets
-            // re-inserted again. (pre-U behavior)
-            List<String> iccIds = getIccIdsOfInsertedPhysicalSims();
-            mSubscriptionDatabaseManager.getAllSubscriptions().stream()
-                    // All the removed pSIMs (Note this could include some erased eSIM that has
-                    // embedded bit removed).
-                    .filter(subInfo -> !iccIds.contains(subInfo.getIccId())
-                            && !subInfo.isEmbedded())
-                    .forEach(subInfo -> {
-                        int subId = subInfo.getSubscriptionId();
-                        log("updateSubscription: Re-enable Uicc application on sub " + subId);
-                        mSubscriptionDatabaseManager.setUiccApplicationsEnabled(subId, true);
-                        // When sim is absent, set the port index to invalid port index.
-                        // (pre-U behavior)
-                        mSubscriptionDatabaseManager.setPortIndex(subId,
-                                TelephonyManager.INVALID_PORT_INDEX);
-                    });
+            if (!isDsdsToSsConfigEnabled()) {
+                // Re-enable the SIM when it's removed, so it will be in enabled state when it gets
+                // re-inserted again. (pre-U behavior)
+                List<String> iccIds = getIccIdsOfInsertedSims();
+                mSubscriptionDatabaseManager.getAllSubscriptions().stream()
+                        // All the removed pSIMs (Note this could include some erased eSIM that has
+                        // embedded bit removed).
+                        .filter(subInfo -> !iccIds.contains(subInfo.getIccId())
+                                && !subInfo.isEmbedded())
+                        .forEach(subInfo -> {
+                            int subId = subInfo.getSubscriptionId();
+                            log("updateSubscription: Re-enable Uicc application on sub " + subId);
+                            mSubscriptionDatabaseManager.setUiccApplicationsEnabled(subId, true);
+                            // When sim is absent, set the port index to invalid port index.
+                            // (pre-U behavior)
+                            mSubscriptionDatabaseManager.setPortIndex(subId,
+                                    TelephonyManager.INVALID_PORT_INDEX);
+                        });
+            }
 
             if (mSlotIndexToSubId.containsKey(phoneId)) {
                 markSubscriptionsInactive(phoneId);
@@ -1440,10 +1445,19 @@ public class SubscriptionManagerService extends ISub.Stub {
         if (areAllSubscriptionsLoaded()) {
             log("Notify all subscriptions loaded.");
             MultiSimSettingController.getInstance().notifyAllSubscriptionLoaded();
+
+            PhoneSwitcher phoneSwitcher = PhoneSwitcher.getInstance();
+            if (phoneSwitcher != null) {
+                phoneSwitcher.notifySubInfoReady();
+            }
         }
 
         updateGroupDisabled();
         updateDefaultSubId();
+    }
+
+    public boolean isDsdsToSsConfigEnabled() {
+        return false;
     }
 
     /**
@@ -1887,11 +1901,10 @@ public class SubscriptionManagerService extends ISub.Stub {
         // Now that all security checks pass, perform the operation as ourselves.
         final long identity = Binder.clearCallingIdentity();
         try {
-            // Available eSIM profiles are reported by EuiccManager. However for physical SIMs if
-            // they are in inactive slot or programmatically disabled, they are still considered
-            // available. In this case we get their iccid from slot info and include their
-            // subscriptionInfos.
-            List<String> iccIds = getIccIdsOfInsertedPhysicalSims();
+            // Both physical SIM and eSIM if they are in inactive slot or programmatically disabled,
+            // they are still considered available.In this case we get their iccid from slot info
+            // and include their subscriptionInfos.
+            List<String> iccIds = getIccIdsOfInsertedSims();
 
             return mSubscriptionDatabaseManager.getAllSubscriptions().stream()
                     .filter(subInfo -> subInfo.isActive() || iccIds.contains(subInfo.getIccId())
@@ -2694,7 +2707,7 @@ public class SubscriptionManagerService extends ISub.Stub {
     /**
      * Update default sub id.
      */
-    private void updateDefaultSubId() {
+    public void updateDefaultSubId() {
         int subId;
         boolean isVoiceCapable = mTelephonyManager.isVoiceCapable();
 
@@ -3912,6 +3925,12 @@ public class SubscriptionManagerService extends ISub.Stub {
         return "[" + mSlotIndexToSubId.entrySet().stream()
                 .map(e -> "slot " + e.getKey() + ": subId=" + e.getValue())
                 .collect(Collectors.joining(", ")) + "]";
+    }
+
+    public boolean isSubIdCreationPending() {
+        log("isSubIdCreationPending()...");
+
+        return false;
     }
 
     /**

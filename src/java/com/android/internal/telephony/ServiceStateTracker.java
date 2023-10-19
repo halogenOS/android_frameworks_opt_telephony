@@ -143,7 +143,7 @@ public class ServiceStateTracker extends Handler {
     private static final String PROP_FORCE_ROAMING = "telephony.test.forceRoaming";
 
     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
-    private CommandsInterface mCi;
+    protected CommandsInterface mCi;
     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
     private UiccController mUiccController = null;
     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
@@ -339,6 +339,7 @@ public class ServiceStateTracker extends Handler {
     private int mPrevSubId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
 
     private boolean mImsRegistered = false;
+    private boolean mCarrierConfigLoaded = false;
 
     @UnsupportedAppUsage(maxTargetSdk = Build.VERSION_CODES.R, trackingBug = 170729553)
     private SubscriptionManager mSubscriptionManager;
@@ -599,7 +600,7 @@ public class ServiceStateTracker extends Handler {
     private String mCurrentCarrier = null;
 
     private final AccessNetworksManager mAccessNetworksManager;
-    private final SparseArray<NetworkRegistrationManager> mRegStateManagers = new SparseArray<>();
+    protected final SparseArray<NetworkRegistrationManager> mRegStateManagers = new SparseArray<>();
 
     /* Last known TAC/LAC */
     private int mLastKnownAreaCode = CellInfo.UNAVAILABLE;
@@ -659,7 +660,7 @@ public class ServiceStateTracker extends Handler {
 
         mAccessNetworksManager = mPhone.getAccessNetworksManager();
         mOutOfServiceSS = new ServiceState();
-        mOutOfServiceSS.setOutOfService(false);
+        mOutOfServiceSS.setOutOfService(mAccessNetworksManager.isInLegacyMode(), false);
 
         for (int transportType : mAccessNetworksManager.getAvailableTransports()) {
             mRegStateManagers.append(transportType, new NetworkRegistrationManager(
@@ -776,10 +777,11 @@ public class ServiceStateTracker extends Handler {
         }
 
         mSS = new ServiceState();
-        mSS.setOutOfService(false);
+        mSS.setOutOfService(mAccessNetworksManager.isInLegacyMode(), false);
         mNewSS = new ServiceState();
-        mNewSS.setOutOfService(false);
+        mNewSS.setOutOfService(mAccessNetworksManager.isInLegacyMode(), false);
         mLastCellInfoReqTime = 0;
+        mNewSS.setStateOutOfService();
         mLastCellInfoList = null;
         mStartedGprsRegCheck = false;
         mReportedGprsNoReg = false;
@@ -1813,7 +1815,7 @@ public class ServiceStateTracker extends Handler {
                 .getSystemService(Context.TELEPHONY_SERVICE))
                 .getSimOperatorNumericForPhone(mPhone.getPhoneId());
 
-        if (!TextUtils.isEmpty(operatorNumeric) && getCdmaMin() != null) {
+        if (!TextUtils.isEmpty(operatorNumeric) && !TextUtils.isEmpty(getCdmaMin())) {
             return (operatorNumeric + getCdmaMin());
         } else {
             return null;
@@ -2594,8 +2596,11 @@ public class ServiceStateTracker extends Handler {
         }
 
         for (PhysicalChannelConfig pcc : pccs) {
+            boolean isNetworkTypeMatched = pcc.getNetworkType() == networkType ||
+                    (networkType == TelephonyManager.NETWORK_TYPE_LTE &&
+                    pcc.getNetworkType() == TelephonyManager.NETWORK_TYPE_LTE_CA);
             if (pcc.getConnectionStatus() == PhysicalChannelConfig.CONNECTION_PRIMARY_SERVING
-                    && pcc.getNetworkType() == networkType && pcc.getPhysicalCellId() == pci) {
+                    && isNetworkTypeMatched && pcc.getPhysicalCellId() == pci) {
                 return pcc;
             }
         }
@@ -2655,7 +2660,11 @@ public class ServiceStateTracker extends Handler {
              * The test for the operators is to handle special roaming
              * agreements and MVNO's.
              */
-            boolean roaming = (mGsmVoiceRoaming || mGsmDataRoaming);
+            boolean roaming = (mGsmVoiceRoaming || mGsmDataRoaming) && mCarrierConfigLoaded;
+
+            log("updateRoamingState: roaming = " + roaming + ", mGsmVoiceRoaming = " +
+                    mGsmVoiceRoaming + ", mGsmDataRoaming = " +
+                    mGsmDataRoaming + ", mCarrierConfigLoaded = " + mCarrierConfigLoaded);
 
             if (roaming && !isOperatorConsideredRoaming(mNewSS)
                     && (isSameNamedOperators(mNewSS) || isOperatorConsideredNonRoaming(mNewSS))) {
@@ -3309,7 +3318,7 @@ public class ServiceStateTracker extends Handler {
                 nri = mNewSS.getNetworkRegistrationInfo(
                         NetworkRegistrationInfo.DOMAIN_PS,
                         AccessNetworkConstants.TRANSPORT_TYPE_WLAN);
-                mNewSS.setOutOfService(false);
+                mNewSS.setOutOfService(mAccessNetworksManager.isInLegacyMode(), false);
                 // Add the IWLAN registration info back to service state.
                 if (nri != null) {
                     mNewSS.addNetworkRegistrationInfo(nri);
@@ -3326,7 +3335,7 @@ public class ServiceStateTracker extends Handler {
                 nri = mNewSS.getNetworkRegistrationInfo(
                         NetworkRegistrationInfo.DOMAIN_PS,
                         AccessNetworkConstants.TRANSPORT_TYPE_WLAN);
-                mNewSS.setOutOfService(true);
+                mNewSS.setOutOfService(mAccessNetworksManager.isInLegacyMode(), true);
                 // Add the IWLAN registration info back to service state.
                 if (nri != null) {
                     mNewSS.addNetworkRegistrationInfo(nri);
@@ -3344,36 +3353,40 @@ public class ServiceStateTracker extends Handler {
                 }
 
             default:
-                // Issue all poll-related commands at once then count down the responses, which
-                // are allowed to arrive out-of-order
-                mPollingContext[0]++;
-                mCi.getOperator(obtainMessage(EVENT_POLL_STATE_OPERATOR, mPollingContext));
+                issuePollCommands();
+                break;
+        }
+    }
 
-                mPollingContext[0]++;
-                mRegStateManagers.get(AccessNetworkConstants.TRANSPORT_TYPE_WWAN)
-                        .requestNetworkRegistrationInfo(NetworkRegistrationInfo.DOMAIN_PS,
-                                obtainMessage(EVENT_POLL_STATE_PS_CELLULAR_REGISTRATION,
-                                        mPollingContext));
+    protected void issuePollCommands() {
+        log("issuePollCommands");
+        // Issue all poll-related commands at once then count down the responses, which
+        // are allowed to arrive out-of-order
+        mPollingContext[0]++;
+        mCi.getOperator(obtainMessage(EVENT_POLL_STATE_OPERATOR, mPollingContext));
 
-                mPollingContext[0]++;
-                mRegStateManagers.get(AccessNetworkConstants.TRANSPORT_TYPE_WWAN)
-                        .requestNetworkRegistrationInfo(NetworkRegistrationInfo.DOMAIN_CS,
+        mPollingContext[0]++;
+        mRegStateManagers.get(AccessNetworkConstants.TRANSPORT_TYPE_WWAN)
+                .requestNetworkRegistrationInfo(NetworkRegistrationInfo.DOMAIN_PS,
+                        obtainMessage(EVENT_POLL_STATE_PS_CELLULAR_REGISTRATION, mPollingContext));
+
+        mPollingContext[0]++;
+        mRegStateManagers.get(AccessNetworkConstants.TRANSPORT_TYPE_WWAN)
+                .requestNetworkRegistrationInfo(NetworkRegistrationInfo.DOMAIN_CS,
                         obtainMessage(EVENT_POLL_STATE_CS_CELLULAR_REGISTRATION, mPollingContext));
 
-                if (mRegStateManagers.get(AccessNetworkConstants.TRANSPORT_TYPE_WLAN) != null) {
-                    mPollingContext[0]++;
-                    mRegStateManagers.get(AccessNetworkConstants.TRANSPORT_TYPE_WLAN)
-                            .requestNetworkRegistrationInfo(NetworkRegistrationInfo.DOMAIN_PS,
-                                    obtainMessage(EVENT_POLL_STATE_PS_IWLAN_REGISTRATION,
-                                            mPollingContext));
-                }
+        if (mRegStateManagers.get(AccessNetworkConstants.TRANSPORT_TYPE_WLAN) != null) {
+            mPollingContext[0]++;
+            mRegStateManagers.get(AccessNetworkConstants.TRANSPORT_TYPE_WLAN)
+                    .requestNetworkRegistrationInfo(NetworkRegistrationInfo.DOMAIN_PS,
+                            obtainMessage(EVENT_POLL_STATE_PS_IWLAN_REGISTRATION,
+                                    mPollingContext));
+        }
 
-                if (mPhone.isPhoneTypeGsm()) {
-                    mPollingContext[0]++;
-                    mCi.getNetworkSelectionMode(obtainMessage(
-                            EVENT_POLL_STATE_NETWORK_SELECTION_MODE, mPollingContext));
-                }
-                break;
+        if (mPhone.isPhoneTypeGsm()) {
+            mPollingContext[0]++;
+            mCi.getNetworkSelectionMode(obtainMessage(
+                    EVENT_POLL_STATE_NETWORK_SELECTION_MODE, mPollingContext));
         }
     }
 
@@ -3453,10 +3466,14 @@ public class ServiceStateTracker extends Handler {
                 mSS.getState() == ServiceState.STATE_POWER_OFF
                         && mNewSS.getState() != ServiceState.STATE_POWER_OFF;
 
-        SparseBooleanArray hasDataAttached = new SparseBooleanArray();
-        SparseBooleanArray hasDataDetached = new SparseBooleanArray();
-        SparseBooleanArray hasRilDataRadioTechnologyChanged = new SparseBooleanArray();
-        SparseBooleanArray hasDataRegStateChanged = new SparseBooleanArray();
+        SparseBooleanArray hasDataAttached = new SparseBooleanArray(
+                mAccessNetworksManager.getAvailableTransports().length);
+        SparseBooleanArray hasDataDetached = new SparseBooleanArray(
+                mAccessNetworksManager.getAvailableTransports().length);
+        SparseBooleanArray hasRilDataRadioTechnologyChanged = new SparseBooleanArray(
+                mAccessNetworksManager.getAvailableTransports().length);
+        SparseBooleanArray hasDataRegStateChanged = new SparseBooleanArray(
+                mAccessNetworksManager.getAvailableTransports().length);
         boolean anyDataRegChanged = false;
         boolean anyDataRatChanged = false;
         boolean hasAlphaRawChanged =
@@ -3642,7 +3659,7 @@ public class ServiceStateTracker extends Handler {
         ServiceState oldMergedSS = new ServiceState(mPhone.getServiceState());
         mSS = new ServiceState(mNewSS);
 
-        mNewSS.setOutOfService(false);
+        mNewSS.setOutOfService(mAccessNetworksManager.isInLegacyMode(), false);
 
         mCellIdentity = primaryCellIdentity;
         if (mSS.getState() == ServiceState.STATE_IN_SERVICE && primaryCellIdentity != null) {
@@ -3915,7 +3932,7 @@ public class ServiceStateTracker extends Handler {
                     && (mEriManager != null && mEriManager.isEriFileLoaded())
                     && (!ServiceState.isPsOnlyTech(mSS.getRilVoiceRadioTechnology())
                     || mPhone.getContext().getResources().getBoolean(com.android.internal.R
-                    .bool.config_LTE_eri_for_network_name))) {
+                    .bool.config_LTE_eri_for_network_name)) && (!mIsSubscriptionFromRuim)) {
                 // Only when CDMA is in service, ERI will take effect
                 eriText = mSS.getOperatorAlpha();
                 // Now the Phone sees the new ServiceState so it can get the new ERI text
@@ -5017,6 +5034,9 @@ public class ServiceStateTracker extends Handler {
             mCdnr.updateEfForEri(getOperatorNameFromEri());
         }
 
+        mCarrierConfigLoaded = true;
+        pollState();
+
         updateOperatorNamePattern(mCarrierConfig);
         mCdnr.updateEfFromCarrierConfig(mCarrierConfig);
         mPhone.notifyCallForwardingIndicator();
@@ -5504,7 +5524,8 @@ public class ServiceStateTracker extends Handler {
     }
 
     /**
-     * This method makes some adjustments when the device camps on IWLAN in airplane mode.
+     * This method adds IWLAN registration info for legacy mode devices camped on IWLAN. It also
+     * makes some adjustments when the device camps on IWLAN in airplane mode.
      */
     private void processIwlanRegistrationInfo() {
         if (mCi.getRadioState() == TelephonyManager.RADIO_POWER_OFF) {
@@ -5518,7 +5539,7 @@ public class ServiceStateTracker extends Handler {
             }
             // operator info should be kept in SS
             String operator = mNewSS.getOperatorAlphaLong();
-            mNewSS.setOutOfService(true);
+            mNewSS.setOutOfService(mAccessNetworksManager.isInLegacyMode(), true);
             if (resetIwlanRatVal) {
                 mNewSS.setDataRegState(ServiceState.STATE_IN_SERVICE);
                 NetworkRegistrationInfo nri = new NetworkRegistrationInfo.Builder()
@@ -5528,6 +5549,17 @@ public class ServiceStateTracker extends Handler {
                         .setRegistrationState(NetworkRegistrationInfo.REGISTRATION_STATE_HOME)
                         .build();
                 mNewSS.addNetworkRegistrationInfo(nri);
+                if (mAccessNetworksManager.isInLegacyMode()) {
+                    // If in legacy mode, simulate the behavior that IWLAN registration info
+                    // is reported through WWAN transport.
+                    nri = new NetworkRegistrationInfo.Builder()
+                            .setTransportType(AccessNetworkConstants.TRANSPORT_TYPE_WWAN)
+                            .setDomain(NetworkRegistrationInfo.DOMAIN_PS)
+                            .setAccessNetworkTechnology(TelephonyManager.NETWORK_TYPE_IWLAN)
+                            .setRegistrationState(NetworkRegistrationInfo.REGISTRATION_STATE_HOME)
+                            .build();
+                    mNewSS.addNetworkRegistrationInfo(nri);
+                }
                 mNewSS.setOperatorAlphaLong(operator);
                 // Since it's in airplane mode, cellular must be out of service. The only possible
                 // transport for data to go through is the IWLAN transport. Setting this to true
@@ -5536,6 +5568,31 @@ public class ServiceStateTracker extends Handler {
                 log("pollStateDone: mNewSS = " + mNewSS);
             }
             return;
+        }
+
+        // If the device operates in legacy mode and camps on IWLAN, modem reports IWLAN as a RAT
+        // through WWAN registration info. To be consistent with the behavior with AP-assisted mode,
+        // we manually make a WLAN registration info for clients to consume. In this scenario,
+        // both WWAN and WLAN registration info are the IWLAN registration info and that's the
+        // unfortunate limitation we have when the device operates in legacy mode. In AP-assisted
+        // mode, the WWAN registration will correctly report the actual cellular registration info
+        // when the device camps on IWLAN.
+        if (mAccessNetworksManager.isInLegacyMode()) {
+            NetworkRegistrationInfo wwanNri = mNewSS.getNetworkRegistrationInfo(
+                    NetworkRegistrationInfo.DOMAIN_PS, AccessNetworkConstants.TRANSPORT_TYPE_WWAN);
+            if (wwanNri != null && wwanNri.getAccessNetworkTechnology()
+                    == TelephonyManager.NETWORK_TYPE_IWLAN) {
+                NetworkRegistrationInfo wlanNri = new NetworkRegistrationInfo.Builder()
+                        .setTransportType(AccessNetworkConstants.TRANSPORT_TYPE_WLAN)
+                        .setDomain(NetworkRegistrationInfo.DOMAIN_PS)
+                        .setRegistrationState(wwanNri.getNetworkRegistrationState())
+                        .setAccessNetworkTechnology(TelephonyManager.NETWORK_TYPE_IWLAN)
+                        .setRejectCause(wwanNri.getRejectCause())
+                        .setEmergencyOnly(wwanNri.isEmergencyEnabled())
+                        .setAvailableServices(wwanNri.getAvailableServices())
+                        .build();
+                mNewSS.addNetworkRegistrationInfo(wlanNri);
+            }
         }
     }
 

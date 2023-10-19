@@ -78,7 +78,6 @@ public class DataSettingsManager extends Handler {
     private static final int EVENT_SET_DATA_ROAMING_ENABLED = 6;
     /** Event for set mobile data policy. */
     private static final int EVENT_SET_MOBILE_DATA_POLICY = 7;
-
     /** Event for device provisioned changed. */
     private static final int EVENT_PROVISIONED_CHANGED = 9;
     /** Event for provisioning data enabled setting changed. */
@@ -86,7 +85,7 @@ public class DataSettingsManager extends Handler {
     /** Event for initializing DataSettingsManager. */
     private static final int EVENT_INITIALIZE = 11;
 
-    private final Phone mPhone;
+    protected final Phone mPhone;
     private final ContentResolver mResolver;
     private final SettingsObserver mSettingsObserver;
     private final String mLogTag;
@@ -316,7 +315,8 @@ public class DataSettingsManager extends Handler {
         }
     }
 
-    private void updateDataEnabledAndNotify(@TelephonyManager.DataEnabledChangedReason int reason) {
+    protected void updateDataEnabledAndNotify(
+            @TelephonyManager.DataEnabledChangedReason int reason) {
         updateDataEnabledAndNotify(reason, mPhone.getContext().getOpPackageName());
     }
 
@@ -385,7 +385,6 @@ public class DataSettingsManager extends Handler {
             boolean userDataEnabled = isUserDataEnabled();
             // Check if we should temporarily enable data based on mobile data policy.
             boolean isDataEnabledOverridden = isDataEnabledOverriddenForApn(apnType);
-
 
             return ((userDataEnabled || isDataEnabledOverridden)
                     && mDataEnabledSettings.get(TelephonyManager.DATA_ENABLED_REASON_POLICY)
@@ -723,23 +722,22 @@ public class DataSettingsManager extends Handler {
         boolean isNonDds = mPhone.getSubId() != SubscriptionManagerService.getInstance()
                 .getDefaultDataSubId();
 
+        Phone defaultDataPhone = PhoneFactory.getPhone(SubscriptionManagerService.getInstance()
+                .getPhoneId(SubscriptionManagerService.getInstance().getDefaultDataSubId()));
+
+        boolean isDdsUserEnabled = defaultDataPhone != null && defaultDataPhone.isUserDataEnabled();
+
         // mobile data policy : data during call
         if (isMobileDataPolicyEnabled(TelephonyManager
                 .MOBILE_DATA_POLICY_DATA_ON_NON_DEFAULT_DURING_VOICE_CALL)) {
-            overridden = overridden || isNonDds && mPhone.getState() != PhoneConstants.State.IDLE;
+            overridden |= isNonDds && isDdsUserEnabled
+                    && mPhone.getState() != PhoneConstants.State.IDLE;
         }
 
         // mobile data policy : auto data switch
         if (isMobileDataPolicyEnabled(TelephonyManager.MOBILE_DATA_POLICY_AUTO_DATA_SWITCH)) {
             // check user enabled data on the default data phone
-            Phone defaultDataPhone = PhoneFactory.getPhone(SubscriptionManagerService.getInstance()
-                    .getPhoneId(SubscriptionManagerService.getInstance()
-                            .getDefaultDataSubId()));
-            if (defaultDataPhone == null) {
-                loge("isDataEnabledOverriddenForApn: unexpected defaultDataPhone is null");
-            } else {
-                overridden = overridden || isNonDds && defaultDataPhone.isUserDataEnabled();
-            }
+            overridden |= isNonDds && isDdsUserEnabled;
         }
         return overridden;
     }

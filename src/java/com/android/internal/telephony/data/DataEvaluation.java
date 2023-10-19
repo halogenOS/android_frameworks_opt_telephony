@@ -243,6 +243,8 @@ public class DataEvaluation {
         TAC_CHANGED(true),
         /** Unsatisfied network request detached. */
         UNSATISFIED_REQUEST_DETACHED(true),
+        /** Secure Mode state changed. */
+        SECURE_MODE_STATE_CHANGED(true),
         /**
          * After DDS switch is complete, re-evaluate if any unsatisfied network requests
          * are honor.
@@ -329,6 +331,8 @@ public class DataEvaluation {
         ONLY_ALLOWED_SINGLE_NETWORK(true),
         /** Data enabled settings are not ready. */
         DATA_SETTINGS_NOT_READY(true),
+        /** Device is in Secure Mode. */
+        DATA_RESTRICTED_BY_SECURE_MODE(true),
         /** Handover max retry stopped but network is not on the preferred transport. */
         HANDOVER_RETRY_STOPPED(true);
 

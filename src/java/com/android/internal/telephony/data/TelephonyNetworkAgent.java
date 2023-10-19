@@ -47,26 +47,26 @@ import java.util.concurrent.Executor;
  * has an associated parent {@link DataNetwork}.
  */
 public class TelephonyNetworkAgent extends NetworkAgent {
-    private final String mLogTag;
+    protected String mLogTag;
     private final LocalLog mLocalLog = new LocalLog(128);
 
     /** Max unregister network agent delay. */
     private static final int NETWORK_AGENT_TEARDOWN_DELAY_MS = 5_000;
 
     /** The parent data network. */
-    private final @NonNull DataNetwork mDataNetwork;
+    protected final @NonNull DataNetwork mDataNetwork;
 
     /** Network agent config. For unit test use only. */
     private final @NonNull NetworkAgentConfig mNetworkAgentConfig;
 
     /** This is the id from {@link NetworkAgent#register()}. */
-    private final int mId;
+    protected final int mId;
 
     /**
      * Indicates if this network agent is abandoned. if {@code true}, it ignores the
      * @link NetworkAgent#onNetworkUnwanted()} calls from connectivity service.
      */
-    private boolean mAbandoned = false;
+    protected boolean mAbandoned = false;
 
     /**
      * The callbacks that are used to pass information to {@link DataNetwork} and
@@ -311,6 +311,14 @@ public class TelephonyNetworkAgent extends NetworkAgent {
     }
 
     /**
+     * Clear the delay of tearing down. When teardwon already happens, allow connectivity service
+     * to destroy native network immediately.
+     */
+    public void clearTeardownDelay() {
+        setTeardownDelayMillis(0);
+    }
+
+    /**
      * Register the callback for receiving information from {@link TelephonyNetworkAgent}.
      *
      * @param callback The callback.
@@ -340,7 +348,7 @@ public class TelephonyNetworkAgent extends NetworkAgent {
      * Log error messages.
      * @param s error messages
      */
-    private void loge(@NonNull String s) {
+    protected void loge(@NonNull String s) {
         Rlog.e(mLogTag, s);
     }
 

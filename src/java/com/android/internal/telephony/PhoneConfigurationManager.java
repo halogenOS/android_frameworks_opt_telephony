@@ -19,8 +19,10 @@ package com.android.internal.telephony;
 import static android.telephony.TelephonyManager.ACTION_MULTI_SIM_CONFIG_CHANGED;
 import static android.telephony.TelephonyManager.EXTRA_ACTIVE_SIM_SUPPORTED_COUNT;
 
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.AsyncResult;
 import android.os.Build;
 import android.os.Handler;
@@ -52,7 +54,7 @@ public class PhoneConfigurationManager {
     public static final String DSDA = "dsda";
     public static final String DSDS = "dsds";
     public static final String TSTS = "tsts";
-    public static final String SSSS = "";
+    public static final String SSSS = "ssss";
     private static final String LOG_TAG = "PhoneCfgMgr";
     private static final int EVENT_SWITCH_DSDS_CONFIG_DONE = 100;
     private static final int EVENT_GET_MODEM_STATUS = 101;
@@ -74,6 +76,19 @@ public class PhoneConfigurationManager {
     private static final String ALLOW_MOCK_MODEM_PROPERTY = "persist.radio.allow_mock_modem";
     private static final String BOOT_ALLOW_MOCK_MODEM_PROPERTY = "ro.boot.radio.allow_mock_modem";
     private static final boolean DEBUG = !"user".equals(Build.TYPE);
+
+    private final String ACTION_MSIM_VOICE_CAPABILITY =
+            "org.codeaurora.intent.action.MSIM_VOICE_CAPABILITY";
+    private final String PERMISSION_MSIM_VOICE_CAPABILITY =
+            "com.qti.permission.RECEIVE_MSIM_VOICE_CAPABILITY";
+    private final String EXTRAS_MSIM_VOICE_CAPABILITY = "MsimVoiceCapability";
+    private final String EXTRAS_DSDS_TRANSITION_SUPPORTED = "DsdsTransitionSupported";
+
+    private static final String ACTION_MSIM_VOICE_CAPABILITY_CHANGED =
+            "org.codeaurora.intent.action.MSIM_VOICE_CAPABILITY_CHANGED";
+    private static final String PERMISSION_MSIM_VOICE_CAPABILITY_CHANGED =
+            "com.qti.permission.RECEIVE_MSIM_VOICE_CAPABILITY_CHANGED";
+
     /**
      * Init method to instantiate the object
      * Should only be called once.
@@ -110,7 +125,26 @@ public class PhoneConfigurationManager {
         for (Phone phone : mPhones) {
             registerForRadioState(phone);
         }
+        mContext.registerReceiver(mConcurrentCallsReceiver,
+                new IntentFilter(ACTION_MSIM_VOICE_CAPABILITY), PERMISSION_MSIM_VOICE_CAPABILITY,
+                null);
     }
+
+    private BroadcastReceiver mConcurrentCallsReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            int voiceCapability = intent.getIntExtra(EXTRAS_MSIM_VOICE_CAPABILITY,
+                    TelephonyManager.MultiSimVoiceCapability.UNKNOWN);
+            boolean isDsdsTransitionSupported =
+                    intent.getBooleanExtra(EXTRAS_DSDS_TRANSITION_SUPPORTED,
+                    false);
+            log(" mConcurrentCallsReceiver: voiceCapability : " + voiceCapability +
+                    " + isDsdsTransitionSupported : " + isDsdsTransitionSupported);
+            TelephonyProperties.multi_sim_voice_capability(voiceCapability);
+            TelephonyProperties.dsds_transition_supported(isDsdsTransitionSupported);
+            broadcastMsimVoiceCapabilityChanged();
+        }
+    };
 
     private void registerForRadioState(Phone phone) {
         phone.mCi.registerForAvailable(mHandler, Phone.EVENT_RADIO_AVAILABLE, phone);
@@ -536,6 +570,12 @@ public class PhoneConfigurationManager {
         }
 
         return mPhones[0].mCi.getModemService();
+    }
+
+    private void broadcastMsimVoiceCapabilityChanged() {
+        log("broadcastMsimVoiceCapabilityChanged");
+        Intent intent = new Intent(ACTION_MSIM_VOICE_CAPABILITY_CHANGED);
+        mContext.sendBroadcast(intent, PERMISSION_MSIM_VOICE_CAPABILITY_CHANGED);
     }
 
     /**

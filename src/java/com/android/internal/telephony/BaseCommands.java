@@ -1284,4 +1284,8 @@ public abstract class BaseCommands implements CommandsInterface {
     public void unregisterForSatelliteProvisionStateChanged(@NonNull Handler h) {
         mSatelliteProvisionStateChangedRegistrants.remove(h);
     }
+
+    @Override
+    public void getEnhancedRadioCapability(Message result) {
+    }
 }

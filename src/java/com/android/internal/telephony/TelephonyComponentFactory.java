@@ -21,36 +21,52 @@ import android.annotation.Nullable;
 import android.content.Context;
 import android.content.res.XmlResourceParser;
 import android.database.Cursor;
+import android.net.NetworkAgentConfig;
+import android.net.NetworkProvider;
+import android.net.NetworkScore;
 import android.os.Handler;
 import android.os.Looper;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.system.OsConstants;
 import android.system.StructStatVfs;
+import android.telephony.AccessNetworkConstants.TransportType;
 import android.text.TextUtils;
+import android.util.SparseArray;
 
 import com.android.ims.ImsManager;
 import com.android.internal.telephony.cdma.CdmaSubscriptionSourceManager;
 import com.android.internal.telephony.cdma.EriManager;
 import com.android.internal.telephony.data.AccessNetworksManager;
+import com.android.internal.telephony.data.DataConfigManager;
+import com.android.internal.telephony.data.DataNetwork;
 import com.android.internal.telephony.data.DataNetworkController;
 import com.android.internal.telephony.data.DataProfileManager;
+import com.android.internal.telephony.data.DataProfileManager.DataProfileManagerCallback;
+import com.android.internal.telephony.data.DataRetryManager;
+import com.android.internal.telephony.data.DataRetryManager.DataRetryManagerCallback;
 import com.android.internal.telephony.data.DataServiceManager;
 import com.android.internal.telephony.data.DataSettingsManager;
 import com.android.internal.telephony.data.LinkBandwidthEstimator;
 import com.android.internal.telephony.data.PhoneSwitcher;
+import com.android.internal.telephony.data.TelephonyNetworkAgent;
+import com.android.internal.telephony.data.TelephonyNetworkAgent.TelephonyNetworkAgentCallback;
+import com.android.internal.telephony.data.TelephonyNetworkFactory;
 import com.android.internal.telephony.emergency.EmergencyNumberTracker;
 import com.android.internal.telephony.imsphone.ImsExternalCallTracker;
 import com.android.internal.telephony.imsphone.ImsNrSaModeHandler;
 import com.android.internal.telephony.imsphone.ImsPhone;
 import com.android.internal.telephony.imsphone.ImsPhoneCallTracker;
 import com.android.internal.telephony.nitz.NitzStateMachineImpl;
+import com.android.internal.telephony.subscription.SubscriptionManagerService;
 import com.android.internal.telephony.uicc.IccCardStatus;
 import com.android.internal.telephony.uicc.UiccCard;
 import com.android.internal.telephony.uicc.UiccProfile;
 import com.android.telephony.Rlog;
 
 import dalvik.system.PathClassLoader;
+
+import java.lang.reflect.Constructor;
 
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
@@ -69,6 +85,7 @@ import java.util.stream.Collectors;
  * this way makes it easier to mock them in tests.
  */
 public class TelephonyComponentFactory {
+    protected static String LOG_TAG = "TelephonyComponentFactory";
 
     private static final String TAG = TelephonyComponentFactory.class.getSimpleName();
 
@@ -247,7 +264,7 @@ public class TelephonyComponentFactory {
      */
     public void injectTheComponentFactory(XmlResourceParser parser) {
         if (mInjectedComponents != null) {
-            Rlog.d(TAG, "Already injected.");
+            Rlog.i(TAG, "Already injected.");
             return;
         }
 
@@ -275,18 +292,22 @@ public class TelephonyComponentFactory {
     }
 
     public GsmCdmaCallTracker makeGsmCdmaCallTracker(GsmCdmaPhone phone) {
+        Rlog.d(LOG_TAG, "makeGsmCdmaCallTracker");
         return new GsmCdmaCallTracker(phone);
     }
 
     public SmsStorageMonitor makeSmsStorageMonitor(Phone phone) {
+        Rlog.d(LOG_TAG, "makeSmsStorageMonitor");
         return new SmsStorageMonitor(phone);
     }
 
     public SmsUsageMonitor makeSmsUsageMonitor(Context context) {
+        Rlog.d(LOG_TAG, "makeSmsUsageMonitor");
         return new SmsUsageMonitor(context);
     }
 
     public ServiceStateTracker makeServiceStateTracker(GsmCdmaPhone phone, CommandsInterface ci) {
+        Rlog.d(LOG_TAG, "makeServiceStateTracker");
         return new ServiceStateTracker(phone, ci);
     }
 
@@ -323,11 +344,19 @@ public class TelephonyComponentFactory {
     }
 
     public IccPhoneBookInterfaceManager makeIccPhoneBookInterfaceManager(Phone phone) {
+        Rlog.d(LOG_TAG, "makeIccPhoneBookInterfaceManager");
         return new IccPhoneBookInterfaceManager(phone);
     }
 
     public IccSmsInterfaceManager makeIccSmsInterfaceManager(Phone phone) {
+        Rlog.d(LOG_TAG, "makeIccSmsInterfaceManager");
         return new IccSmsInterfaceManager(phone);
+    }
+
+    public SmsDispatchersController makeSmsDispatchersController(Phone phone) {
+        Rlog.d(LOG_TAG, "makeSmsDispatchersController");
+        return new SmsDispatchersController(phone, phone.mSmsStorageMonitor,
+                phone.mSmsUsageMonitor);
     }
 
     /**
@@ -339,10 +368,12 @@ public class TelephonyComponentFactory {
     }
 
     public EriManager makeEriManager(Phone phone, int eriFileSource) {
+        Rlog.d(LOG_TAG, "makeEriManager");
         return new EriManager(phone, eriFileSource);
     }
 
     public WspTypeDecoder makeWspTypeDecoder(byte[] pdu) {
+        Rlog.d(LOG_TAG, "makeWspTypeDecoder");
         return new WspTypeDecoder(pdu);
     }
 
@@ -353,6 +384,7 @@ public class TelephonyComponentFactory {
             int destPort, boolean is3gpp2, boolean is3gpp2WapPdu, String address,
             String displayAddr, String messageBody, boolean isClass0, int subId,
             @InboundSmsHandler.SmsSource int smsSource) {
+        Rlog.d(LOG_TAG, "makeInboundSmsTracker");
         return new InboundSmsTracker(context, pdu, timestamp, destPort, is3gpp2, is3gpp2WapPdu,
                 address, displayAddr, messageBody, isClass0, subId, smsSource);
     }
@@ -364,6 +396,7 @@ public class TelephonyComponentFactory {
             int destPort, boolean is3gpp2, String address, String displayAddr, int referenceNumber,
             int sequenceNumber, int messageCount, boolean is3gpp2WapPdu, String messageBody,
             boolean isClass0, int subId, @InboundSmsHandler.SmsSource int smsSource) {
+        Rlog.d(LOG_TAG, "makeInboundSmsTracker");
         return new InboundSmsTracker(context, pdu, timestamp, destPort, is3gpp2, address,
                 displayAddr, referenceNumber, sequenceNumber, messageCount, is3gpp2WapPdu,
                 messageBody, isClass0, subId, smsSource);
@@ -374,10 +407,12 @@ public class TelephonyComponentFactory {
      */
     public InboundSmsTracker makeInboundSmsTracker(Context context, Cursor cursor,
             boolean isCurrentFormat3gpp2) {
+        Rlog.d(LOG_TAG, "makeInboundSmsTracker");
         return new InboundSmsTracker(context, cursor, isCurrentFormat3gpp2);
     }
 
     public ImsPhoneCallTracker makeImsPhoneCallTracker(ImsPhone imsPhone) {
+        Rlog.d(LOG_TAG, "makeImsPhoneCallTracker");
         return new ImsPhoneCallTracker(imsPhone, ImsManager::getConnector);
     }
 
@@ -419,6 +454,7 @@ public class TelephonyComponentFactory {
     public CdmaSubscriptionSourceManager
     getCdmaSubscriptionSourceManagerInstance(Context context, CommandsInterface ci, Handler h,
                                              int what, Object obj) {
+        Rlog.d(LOG_TAG, "getCdmaSubscriptionSourceManagerInstance");
         return CdmaSubscriptionSourceManager.getInstance(context, ci, h, what, obj);
     }
 
@@ -430,12 +466,14 @@ public class TelephonyComponentFactory {
     public Phone makePhone(Context context, CommandsInterface ci, PhoneNotifier notifier,
             int phoneId, int precisePhoneType,
             TelephonyComponentFactory telephonyComponentFactory) {
+        Rlog.i(TAG, "makePhone");
         return new GsmCdmaPhone(context, ci, notifier, phoneId, precisePhoneType,
                 telephonyComponentFactory);
     }
 
     public PhoneSwitcher makePhoneSwitcher(int maxDataAttachModemCount, Context context,
             Looper looper) {
+        Rlog.i(TAG, "makePhoneSwitcher");
         return PhoneSwitcher.make(maxDataAttachModemCount, context, looper);
     }
 
@@ -453,6 +491,7 @@ public class TelephonyComponentFactory {
      * @return The multi sim settings controller instance.
      */
     public MultiSimSettingController initMultiSimSettingController(Context c) {
+        Rlog.i(TAG, " initMultiSimSettingController ");
         return MultiSimSettingController.init(c);
     }
 
@@ -470,6 +509,22 @@ public class TelephonyComponentFactory {
         return new LinkBandwidthEstimator(phone, mTelephonyFacade);
     }
 
+    public RIL makeRIL(Context context, int preferredNetworkType,
+            int cdmaSubscription, Integer instanceId) {
+        Rlog.d(LOG_TAG, "makeRIL");
+        return new RIL(context, preferredNetworkType, cdmaSubscription, instanceId);
+    }
+
+    public void makeExtTelephonyClasses(Context context,
+            Phone[] phones, CommandsInterface[] commandsInterfaces) {
+        Rlog.d(LOG_TAG, "makeExtTelephonyClasses");
+    }
+
+    public CarrierInfoManager makeCarrierInfoManager(Phone phone) {
+        Rlog.i(TAG, " makeCarrierInfoManager ");
+        return new CarrierInfoManager();
+    }
+
     /**
      * Create a new data network controller instance. The instance is per-SIM. On multi-sim devices,
      * there will be multiple {@link DataNetworkController} instances.
@@ -480,6 +535,19 @@ public class TelephonyComponentFactory {
      */
     public DataNetworkController makeDataNetworkController(Phone phone, Looper looper) {
         return new DataNetworkController(phone, looper);
+    }
+
+    /**
+     * Create data service manager.
+     *
+     * @param phone The phone object
+     * @param looper The looper for event handling
+     * @param transportType The transport type
+     * @return The data service manager instance
+     */
+    public DataServiceManager makeDataServiceManager(Phone phone, Looper looper,
+            @TransportType int transportType) {
+        return new DataServiceManager(phone, looper, transportType);
     }
 
     /**
@@ -515,5 +583,40 @@ public class TelephonyComponentFactory {
             @NonNull DataNetworkController dataNetworkController, @NonNull Looper looper,
             @NonNull DataSettingsManager.DataSettingsManagerCallback callback) {
         return new DataSettingsManager(phone, dataNetworkController, looper, callback);
+    }
+
+    public DataConfigManager makeDataConfigManager(Phone phone, Looper looper) {
+        Rlog.i(TAG, "makeDataConfigManager");
+        return new DataConfigManager(phone, looper);
+    }
+
+    public DataRetryManager makeDataRetryManager(Phone phone,
+            DataNetworkController dataNetworkController,
+            SparseArray<DataServiceManager> dataServiceManagers,
+            Looper looper, DataRetryManager.DataRetryManagerCallback dataRetryManagerCallback) {
+        Rlog.i(TAG, "makeDataRetryManager");
+        return new DataRetryManager(phone, dataNetworkController, dataServiceManagers,
+                looper, dataRetryManagerCallback);
+    }
+
+    public TelephonyNetworkAgent makeTelephonyNetworkAgent(Phone phone, Looper looper,
+            DataNetwork dataNetwork, NetworkScore score, NetworkAgentConfig config,
+            NetworkProvider provider,
+            TelephonyNetworkAgent.TelephonyNetworkAgentCallback callback) {
+        Rlog.i(TAG, "makeTelephonyNetworkAgent");
+        return new TelephonyNetworkAgent(phone, looper, dataNetwork, score, config,
+                provider, callback);
+    }
+
+    public TelephonyNetworkFactory makeTelephonyNetworkFactory(Looper looper, Phone phone,
+            PhoneSwitcher phoneSwitcher) {
+        Rlog.i(TAG, "make TelephonyNetworkFactory");
+        return new TelephonyNetworkFactory(looper, phone, phoneSwitcher);
+    }
+
+    public SubscriptionManagerService makeSubscriptionManagerService(
+            @NonNull Context context, @NonNull Looper looper) {
+        Rlog.i(TAG, "make SubscriptionManagerService");
+        return new SubscriptionManagerService(context, looper);
     }
 }
