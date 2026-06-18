@@ -1544,7 +1544,7 @@ public class GsmCdmaPhone extends Phone {
                 logd("dialInternal: ignore InCall MMI command during emergency call");
                 return null;
             }
-            if (handleInCallMmiCommands(newDialString)) {
+            if (wrappedCallback == null && handleInCallMmiCommands(newDialString)) {
                 return null;
             }
         }
