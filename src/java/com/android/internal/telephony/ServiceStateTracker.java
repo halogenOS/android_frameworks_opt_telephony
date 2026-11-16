@@ -127,6 +127,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -2184,8 +2185,8 @@ public class ServiceStateTracker extends Handler {
             if (showSpn) {
                 if (TextUtils.isEmpty(carrierName)) {
                     carrierName = spn;
-                } else if (!TextUtils.isEmpty(spn) && !Objects.equals(spn, carrierName)) {
-                    // Need to show both plmn and spn if both are not same.
+                } else if (!TextUtils.isEmpty(spn)) {
+                    // Show both: hideSpnContainedInPlmn() dropped an spn the plmn contains.
                     String separator = mPhone.getContext().getString(
                             com.android.internal.R.string.kg_text_message_separator);
                     carrierName = new StringBuilder().append(carrierName).append(separator)
@@ -2203,9 +2204,9 @@ public class ServiceStateTracker extends Handler {
         final boolean useCdnr = mCarrierConfig.getBoolean(
                 CarrierConfigManager.KEY_ENABLE_CARRIER_DISPLAY_NAME_RESOLVER_BOOL);
 
-        final CarrierDisplayNameData cdnd = useCdnr
+        final CarrierDisplayNameData cdnd = hideSpnContainedInPlmn(useCdnr
                 ? mCdnr.getCarrierDisplayNameData()
-                : getCarrierDisplayNameLegacy();
+                : getCarrierDisplayNameLegacy());
 
         final int subId = mPhone.getSubId();
 
@@ -2451,9 +2452,8 @@ public class ServiceStateTracker extends Handler {
             }
 
             plmn = String.format(wfcVoiceSpnFormat, originalPlmn);
-        } else if (mSS.getState() == ServiceState.STATE_POWER_OFF
-                || (showPlmn && TextUtils.equals(spn, plmn))) {
-            // airplane mode or spn equals plmn, do not show spn
+        } else if (mSS.getState() == ServiceState.STATE_POWER_OFF) {
+            // airplane mode, do not show spn
             spn = null;
             showSpn = false;
         }
@@ -2467,6 +2467,26 @@ public class ServiceStateTracker extends Handler {
                 .setPlmn(plmn)
                 .setShowPlmn(showPlmn)
                 .build();
+    }
+
+    /** Drops the service provider name when the shown network name already contains it. */
+    @NonNull
+    private static CarrierDisplayNameData hideSpnContainedInPlmn(
+            @NonNull CarrierDisplayNameData cdnd) {
+        if (!cdnd.shouldShowPlmn() || !plmnContainsSpn(cdnd.getPlmn(), cdnd.getSpn())) {
+            return cdnd;
+        }
+        return new CarrierDisplayNameData.Builder()
+                .setDataSpn(cdnd.getDataSpn())
+                .setPlmn(cdnd.getPlmn())
+                .setShowPlmn(true)
+                .build();
+    }
+
+    /** Whether the network name already shows the service provider name, ignoring case. */
+    private static boolean plmnContainsSpn(@Nullable String plmn, @Nullable String spn) {
+        return !TextUtils.isEmpty(plmn) && !TextUtils.isEmpty(spn)
+                && plmn.toLowerCase(Locale.ROOT).contains(spn.toLowerCase(Locale.ROOT));
     }
 
     private void updateSatelliteDisplayOverride() {
