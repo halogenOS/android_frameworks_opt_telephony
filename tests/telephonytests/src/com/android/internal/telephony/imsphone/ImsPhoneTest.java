@@ -41,6 +41,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyChar;
@@ -1123,6 +1124,14 @@ public class ImsPhoneTest extends TelephonyTest {
 
         verify(mSubscriptionManagerService, never()).setNumberFromIms(anyInt(), anyString());
 
+        // 5. Malformed URI (sip:@); do not set
+        associatedUris = new Uri[] {
+            Uri.parse("sip:@")
+        };
+        mImsPhoneUT.setPhoneNumberForSourceIms(associatedUris);
+
+        verify(mSubscriptionManagerService, never()).setNumberFromIms(anyInt(), anyString());
+
         // Clean up
         mContextFixture.addCallingOrSelfPermission("");
     }
@@ -1233,6 +1242,15 @@ public class ImsPhoneTest extends TelephonyTest {
             mImsPhoneUT.setPhoneNumberForSourceIms(associatedUris);
         } catch (Exception IllegalArgumentException) {
             throw new AssertionError("not expected exception", IllegalArgumentException);
+        }
+
+        // set throw RuntimeException for mock
+        doThrow(new NullPointerException("test"))
+            .when(mPhoneNumberManager).parsePhoneNumber(any(), any());
+        try {
+            mImsPhoneUT.setPhoneNumberForSourceIms(associatedUris);
+        } catch (Exception e) {
+            throw new AssertionError("not expected exception", e);
         }
 
         // put input with null
@@ -1816,4 +1834,21 @@ public class ImsPhoneTest extends TelephonyTest {
         m.obj = AsyncResult.forMessage(m, ss, null);
         return m;
     }
+
+    @Test
+    @SmallTest
+    public void testHandleUssdRequestWithInCallMmiCode() throws Exception {
+        doReturn(Call.State.INCOMING).when(mRingingCall).getState();
+        android.os.ResultReceiver mockCallback =
+                org.mockito.Mockito.mock(android.os.ResultReceiver.class);
+        try {
+            mImsPhoneUT.handleUssdRequest("2", mockCallback);
+            fail("Expected CallStateException");
+        } catch (CallStateException e) {
+            assertEquals(Phone.CS_FALLBACK, e.getMessage());
+        }
+        // It should NOT call acceptCall because wrappedCallback is not null
+        verify(mImsCT, never()).acceptCall(anyInt());
+    }
 }
+
